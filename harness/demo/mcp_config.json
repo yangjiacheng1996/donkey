@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "calc": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--with",
+        "fastmcp",
+        "fastmcp",
+        "run",
+        "calc_server.py"
+      ],
+      "cwd": "/home/ctyun/workspace/github/donkey/harness/demo"
+    },
+    "notes": {
+      "url": "http://127.0.0.1:8765/mcp",
+      "transport": "streamable-http"
+    }
+  }
+}
