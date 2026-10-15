@@ -21,14 +21,14 @@
 |---|---|---|
 | **N-01** | workspace 内**禁止**出现 `agent.py` / `main.py` 或任何 Python 入口文件 | 立项书 §3.4 + 附录 F |
 | **N-02** | **禁止** subagent / 子智能体相关目录或字段（哲学："agent = 人"，不存在把人降级为子工具的概念） | 立项书 §1.2.3 + §1.5.5 + 附录 F |
-| **N-03** | `core` **禁止** import 任何 client（cli / web / gui） | 立项书 §4.1.1 + 附录 F |
-| **N-04** | `cli` **禁止**直接 import `langchain` / `langgraph` / `sqlite3`；所有 LangChain / LangGraph / sqlite3 调用封在 `core/` 内（web / gui 客户端同理） | 立项书 §4.1.1 + §5.5.6 + 附录 F |
-| **N-05** | `core` **禁止** import `argparse` / `sys.argv` / `click` / `typer`（保持业务 / 客户端边界） | 立项书 §4.1.1 + 附录 F |
-| **N-06** | `donkey load` 失败时 exit code **非 0**，但**不得**修改 workspace 中任何文件 | 立项书附录 F + 调研 `f003_load_workspace.md` |
+| **N-03** | `donkey.core` **禁止** import 任何 client（cli / web / gui） | 立项书 §4.1.1 + 附录 F |
+| **N-04** | `cli` **禁止**直接 import `langchain` / `langgraph` / `sqlite3`；所有 LangChain / LangGraph / sqlite3 调用封在 `donkey/core/` 内（web / gui 客户端同理） | 立项书 §4.1.1 + §5.5.6 + 附录 F |
+| **N-05** | `donkey.core` **禁止** import `argparse` / `sys.argv` / `click` / `typer`（保持业务 / 客户端边界） | 立项书 §4.1.1 + 附录 F |
+| **N-06** | `donkey load` 失败时 exit code **非 0**，但**不得**修改 workspace 中任何文件 | 立项书附录 F |
 | **N-07** | `donkey load` 不依赖 `init`：用户可跳过 `init` 直接跑 load，load 必须检测并清晰报告"未 init" | 立项书附录 F |
-| **N-08** | `donkey` 全子命令 exit code 段位空间严格不重叠（详见第 4 章 §4.4） | 立项书 §5.5.2 + 附录 F |
+| **N-08** | `donkey` 全子命令 exit code 段位空间严格不重叠（详见第 4 章 §4.4） | 立项书 §5.5.3 + 附录 F |
 | **N-09** | `donkey session` 的**对外标识是标题**，thread_id 仅作内部引用 | 立项书 §5.5.4 + 附录 F |
-| **N-10** | `donkey session new` 默认标题"无标题会话"；若给了首轮 prompt，**必须**在 `core.api.new_session` **内部**由 LLM 总结 ≤ 20 字标题并写回 sqlite3；**严禁**实现为 `before_agent` 中间件（**不**进 Agent Loop 图，**不**新增 LangGraph 节点，**不**触发版本号 `x+1`） | 立项书 §5.5.4.1 + 附录 F |
+| **N-10** | `donkey session new` 默认标题"无标题会话"；若给了首轮 prompt，**必须**在 `donkey.core.api.new_session` **内部**由 LLM 总结 ≤ 20 字标题并写回 sqlite3；**严禁**实现为 `before_agent` 中间件（**不**进 Agent Loop 图，**不**新增 LangGraph 节点，**不**触发版本号 `x+1`） | 立项书 §5.5.4.2 + §5.5.4.5 + 附录 F |
 | **N-11** | v1 **必须**同时交付 cli / web / gui 三种客户端，缺一不可；任何客户端**不**允许出现"功能仅 cli 独有"的情况 | 立项书 §1.5.3 + §3.2.1 + §5.5.6 + 附录 F |
 | **N-12** | **禁止**使用任何 LangSmith 相关代码（包含但不**限于** `langsmith` 包 / LangSmith Cloud / Studio UI / Tracing / Deployment / Hub / `langchain[langsmith]` extras / `LANGSMITH_TRACING` 等环境变量）；**禁止**直接 `import langsmith` 或任何 langsmith.* 子包（包括用于诊断智能体的场景） | 立项书 §1.5.5 + §2.1 + 调研 `harness/report/全开源最佳实践.md` §0 |
 
@@ -68,7 +68,7 @@
 
 | 级别 | 内容 | 加载方式 | 触发时机 |
 |---|---|---|---|
-| **Level 1** | `SKILL.md` frontmatter 必填两字段：`name` + `description` | donkey core 扫描后**自动注册为独立 `@tool`**（工具名 `load_skill_<slugify(name)>`） | 工具列表常驻 |
+| **Level 1** | `SKILL.md` frontmatter 必填两字段：`name` + `description` | `donkey.core` 扫描后**自动注册为独立 `@tool`**（工具名 `load_skill_<slugify(name)>`） | 工具列表常驻 |
 | **Level 2** | `SKILL.md` frontmatter 下方的 Markdown 主体 | 通过 Level 1 工具调用返回（返回值含 Level 2 完整内容） | 模型判断相关时调用 |
 | **Level 3** | Skill 目录内除 `SKILL.md` 之外的文件 | 由 workspace 内置 `@tool`（filesystem / commandline / webfetch）或 `FilesystemFileSearchMiddleware.glob_search/grep_search` 读取 | 模型需要深层细节 / 执行时调用 |
 
@@ -139,8 +139,8 @@
 
 - v1 **必须**同时交付 cli / web / gui 三种客户端；
 - 任何客户端**不**允许出现"功能仅 cli 独有"的情况 —— 每个客户端都覆盖同一组最小子命令集（`init` / `load` / `session {list,new,rm,import}` / `run`）；
-- 三端**共用 `core.api` 库 API**，不重复实现业务逻辑；
-- **开发顺序**（与洋葱架构一致）：CLI 在 F001–F004 各 Phase B 期间渐进补齐 → Web 主攻 v1 UI → GUI = Electron 包壳（100% 复用 Web 渲染层）；
+- 三端**共用 `donkey.core.api` 库 API**，不重复实现业务逻辑；
+- **开发顺序**（与洋葱架构一致）：CLI 在 F001–F004 期间渐进补齐 → Web 主攻 v1 UI → GUI = Electron 包壳（100% 复用 Web 渲染层）；
 - **不**允许 Web 未完成就启动 GUI（违反洋葱架构），也**不**允许跳过 CLI 直接做 Web（违反 §4.1.1 库 API 必须先稳定的约束）。
 
 ### 2.9 Skills 自研 + 禁止 deepagents 依赖原则（§立项书 1.2.4 + 调研 `LangChain与DeepAgents的选择.md`）
@@ -169,7 +169,7 @@
 
 ### 3.2 永不使用清单
 
-- ❌ **LangSmith** 任何形态（详见 §N-12）：**禁止**使用 LangSmith Cloud / Studio UI / Tracing / Deployment / Hub / `langchain[langsmith]` extras / `LANGSMITH_TRACING` 等环境变量；**禁止**在 core / cli / web / gui 任何代码路径中 `import langsmith` 或 `import langchain.langsmith / langchain_community.langsmith / langgraph.langsmith` 等任何 langsmith.* 子包（包括但不限于为了"诊断智能体"或"打印运行轨迹"等用途）—— 智能体诊断统一通过 `core` 自有输出（stdout 日志 / 事件流 / 后续自研 tracer）实现，受 `harness/report/全开源最佳实践.md` §0 约束；
+- ❌ **LangSmith** 任何形态（详见 §N-12）：**禁止**使用 LangSmith Cloud / Studio UI / Tracing / Deployment / Hub / `langchain[langsmith]` extras / `LANGSMITH_TRACING` 等环境变量；**禁止**在 `donkey.core` / cli / web / gui 任何代码路径中 `import langsmith` 或 `import langchain.langsmith / langchain_community.langsmith / langgraph.langsmith` 等任何 langsmith.* 子包（包括但不限于为了"诊断智能体"或"打印运行轨迹"等用途）—— 智能体诊断统一通过 `donkey.core` 自有输出（stdout 日志 / 事件流 / 后续自研 tracer）实现，受 `harness/report/全开源最佳实践.md` §0 约束；
 - ❌ **deepagents** 包（含 `create_deep_agent` / FilesystemMiddleware / SubAgentMiddleware / RubricMiddleware / SkillsMiddleware / MemoryMiddleware）—— 见 §2.7.2；
 - ❌ **ShellToolMiddleware**（持久 shell + HITL 冲突）—— 由 `tools/commandline.py` 替代；
 - ❌ **subagent / 子智能体相关任何目录或字段**（`agent = 人`）—— §N-02；
@@ -221,37 +221,57 @@
 
 任何 spec / plan / tasks / 代码 / 文档中出现 F 编号引用必须与上表**字面对齐**。
 
-### 4.3 Phase A / Phase B 实施子阶段（§立项书 5.2）
+### 4.3 Phase 切分规则（§立项书 5.2.1）
 
-每个 F 在 Speckit 实施时拆为：
-- **Phase A**：最小可用骨架 / 契约占位 / 解析 / 错误脱敏 —— 库 API 签名稳定 + 错误脱敏 + 占位（return 框架级 dummy result）+ exit code 段位对齐 + 单测骨架；
-- **Phase B**：完整业务逻辑 + 与前序 F 的联调 + e2e + 文档同步。
+**核心原则**：Phase 是 Feature 内部的实施子阶段，**不再按一级命令划分**（一级命令已被 F 编号锁死）。Phase 按以下两条规则二选一进行切分：
 
-**Speckit 按跨 Feature 的 Phase 序开发**（不严格按 F 序号），同一阶段并行多个 F 的同 Phase 任务。
+| 规则 | 适用 Feature | 切分单位 |
+|---|---|---|
+| **规则 A：按二级命令切** | 含二级命令的 Feature（如 F003 `donkey session list / new / remove / import`） | 每个二级命令 = 一个 Phase |
+| **规则 B：按退出码段位切** | 无二级命令的 Feature（如 F001 `donkey init`、F002 `donkey load`、F004 `donkey run`、F005 `donkey web` 7 子段、F006 `donkey gui` 3 子段） | 每 N 个连续退出码 = 一个 Phase（N 由该 Feature 失败场景数量决定） |
 
-### 4.4 exit code 段位分配总表（§立项书 §5.5.2 + N-08）
+**每设计一个 Phase 必带三要素**：
+1. **入口条件**：前置 Phase 的退出条件必须全部满足（可执行命令/测试验证通过）；
+2. **异常退出码**：该 Phase 失败时返回的 exit code（落在该 Feature 段位内，详见 §4.4 + 立项书 §5.5.3）；
+3. **退出条件**：可执行、可验证的硬指标（由 `verify_phase_<f>_<n>.py` 验证脚本跑出 PASS/FAIL，**不**依赖 Maintainer 主观判断）。
 
-`donkey` 各子命令 exit code 段位严格不重叠：
+**Speckit 协作方式**：按跨 Feature 滚动推进 —— 同一时段并行多个 Feature 的同 Phase 任务；Feature 内部 Phase 严格串行。
+
+**废弃说明**：旧"Phase A = 骨架 / Phase B = 完整"两段式切分方式已**弃用**——"骨架"与"完整"是主观形容词，不可量化；新方案一律按规则 A（二级命令）或规则 B（退出码段位）切分。具体 Phase 编号、退出码分配、退出条件细节在各自 Feature spec 中规定；宪法与立项书 §5.2.1 只规定**切分原理**，**不**展开具体编号。
+
+### 4.4 exit code 段位分配总表（§立项书 §5.5.3 + N-08）
+
+`donkey` 各子命令 exit code 段位严格不重叠（同时也是 §4.3 规则 B 切 Phase 的基础）：
 
 | 段位 | 归属 | 冗余性 | 说明 |
 |---|---|---|---|
 | `0` | 全子命令 | 1 码 | 一切正常 |
-| `1-10` | `donkey init` | 10 码 | F001 域 |
-| `11-20` | `donkey load` | 10 码 | F002 域 |
-| `21-30` | `donkey session` | 10 码 | F003 域 |
-| `31-40` | `donkey run` → tools 调用 | 10 码 | run 域子段 1：用户 / 系统 `@tool` 执行错误 |
-| `41-50` | `donkey run` → Skills 加载 | 10 码 | run 域子段 2：per-skill tool / SKILL.md 加载错误 |
-| `51-60` | `donkey run` → MCP server | 10 码 | run 域子段 3：`MCPAdapter` / server 通信错误 |
-| `61-70` | `donkey run` → 短期记忆（Saver） | 10 码 | run 域子段 4：`SqliteSaver` 读写错误 |
-| `71-80` | `donkey run` → 长期记忆（Store） | 10 码 | run 域子段 5：`SqliteStore`（v3）/ `InMemoryStore`（v1/v2） |
-| `81-90` | `donkey run` → 中间件 | 10 码 | run 域子段 6：10 项 v1 中间件 + 后续中间件错误 |
-| `91-100` | `donkey run` → Agent Loop | 10 码 | run 域子段 7：图编译失败 / 节点类型不匹配 / State schema 异常 |
-| `101+` | v2 / v3 / v4+ 扩展 | 预留 | 留给后续版本 |
+| `1-10` | `donkey init` | 10 码 | F001 域 —— 按 §4.3 规则 B 切 Phase |
+| `11-20` | `donkey load` | 10 码 | F002 域 —— 按 §4.3 规则 B 切 Phase |
+| `21-30` | `donkey session` | 10 码 | F003 域 —— 按 §4.3 规则 A 切 Phase（4 个 Phase = list / new / remove / import，每个二级命令均分 2-3 码值 + 保留） |
+| `31-40` | `donkey run` → tools 调用 | 10 码 | F004 子段 1：用户 / 系统 `@tool` 执行错误；按 §4.3 规则 B，对应 F004 的一个 Phase |
+| `41-50` | `donkey run` → Skills 加载 | 10 码 | F004 子段 2：per-skill tool / SKILL.md 加载错误；F004 的一个 Phase |
+| `51-60` | `donkey run` → MCP server | 10 码 | F004 子段 3：`MCPAdapter` / server 通信错误；F004 的一个 Phase |
+| `61-70` | `donkey run` → 短期记忆（Saver） | 10 码 | F004 子段 4：`SqliteSaver` 读写错误；F004 的一个 Phase |
+| `71-80` | `donkey run` → 长期记忆（Store） | 10 码 | F004 子段 5：`SqliteStore`（v3）/ `InMemoryStore`（v1/v2）；F004 的一个 Phase |
+| `81-90` | `donkey run` → 中间件 | 10 码 | F004 子段 6：10 项 v1 中间件 + 后续中间件错误；F004 的一个 Phase |
+| `91-100` | `donkey run` → Agent Loop | 10 码 | F004 子段 7：图编译失败 / 节点类型不匹配 / State schema 异常；F004 的一个 Phase |
+| `101-110` | `donkey web` → 事件流 | 10 码 | F005 子段 1：WebSocket / SSE 连接 / 消息序列化 / 断流重连 |
+| `111-120` | `donkey web` → IPC 桥接 | 10 码 | F005 子段 2：cli ↔ web 进程间调用 / 超时 / 序列化 |
+| `121-130` | `donkey web` → 渲染 | 10 码 | F005 子段 3：组件异常 / SSR-CSR 失配 / Markdown-代码高亮 |
+| `131-140` | `donkey web` → 状态管理 | 10 码 | F005 子段 4：session / store 同步 / 状态丢失 / 回滚失败 |
+| `141-150` | `donkey web` → 鉴权 / CORS / CSP | 10 码 | F005 子段 5：跨域 / cookie / token 过期 |
+| `151-160` | `donkey web` → 资源加载 | 10 码 | F005 子段 6：chunk 404 / CDN 失败 / WebAssembly |
+| `161-170` | `donkey web` → 其它 | 10 码 | F005 子段 7：浏览器兼容性 / 用户输入校验 / 未分类 |
+| `171-180` | `donkey gui` → Electron 主进程 | 10 码 | F006 子段 1：app 生命周期 / 菜单 / 托盘 |
+| `181-190` | `donkey gui` → 窗口 | 10 码 | F006 子段 2：窗口创建 / 恢复 / 聚焦 / 多窗口 |
+| `191-200` | `donkey gui` → 原生胶水 | 10 码 | F006 子段 3：文件对话框 / 通知 / 剪贴板 / 系统 API |
+| `201+` | v2 / v3 / v4+ 扩展 | 预留 | 留给后续版本（v2 HITL / v3 长期记忆特性 / v4 编程智能体深度适配） |
 
 **冗余性设计原则**：
 - 每个段位预留 10 个码值，吸收 v1.x 试运行期间发现的额外失败场景；
 - `0` 是唯一正常返回码；任何 `> 0` 都视为失败；
-- `99+` 留给未来大版本 —— 每个大版本占 100 个码值（含 1 个正常返回）；
+- `201+` 留给未来大版本 —— 每个大版本占 100 个码值（含 1 个正常返回）；
 - `donkey load` 段位起点 `11`（与 F002 域一致），9 项 hard error 占 `11-19`，`20` 留冗余；
 - **warning 不计入失败**（如 `provider.toml.secret_key` 缺失但 `LLM_API_KEY` 已设）—— `--strict-warnings` 列入 v2 候选。
 
@@ -281,7 +301,7 @@
 **技术指标**：
 - load 9 项检查覆盖率 100%（§立项书 §5.5.3 清单 9 项）；
 - 中间件录用率 100%（v1 承诺的 10 项全部挂载）；
-- 单元测试覆盖率 ≥ 80%（core）。
+- 单元测试覆盖率 ≥ 80%（`donkey.core`）。
 
 ---
 
