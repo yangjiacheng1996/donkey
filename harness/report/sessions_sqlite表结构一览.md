@@ -95,7 +95,7 @@ def build_sessions_sqlite(path: Path) -> None:
     """构造 sessions.sqlite3 schema-built 空文件（F001-P2 §4.7.6）。
 
     失败归类：统一抛 TemplateGenerationError (exit 3)——
-    源缺失 / 渲染失败 / 文件写入失败 / sqlite3 schema 构造失败 四合并一（奥卡姆）。
+    模板清单损坏 / schema 非法 / 源缺失 / 渲染失败 / 文件写入失败 / sqlite3 schema 构造失败 五合并一（奥卡姆）。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))

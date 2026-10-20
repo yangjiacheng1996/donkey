@@ -1,0 +1,22 @@
+# =============================================================================
+# providers/deepseek.toml —— DeepSeek（专用 `ChatDeepSeek`）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key）
+#   3. 在 providers/default.toml 里设置 default_provider = "deepseek" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = true
+
+api_key = "sk-REPLACE_ME"          # 🔒 脱敏版占位符——真实 key 写进 providers.local/
+api_host = "https://api.deepseek.com/v1"
+timeout = 60
+max_retries = 6
+temperature = 1.0
+max_tokens = 4096
+
+[models.deepseek-v4-flash]
+max_tokens = 4096

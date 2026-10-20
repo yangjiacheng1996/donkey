@@ -1,0 +1,20 @@
+# =============================================================================
+# providers/default.toml —— 全局默认（**保留名**：不描述任何 provider）
+# =============================================================================
+#
+# 本文件是 providers/ 目录里**唯一**不描述 provider 配置的文件。
+# 它只回答一个问题："这个 workspace 默认用哪个 provider 的哪个 model？"
+#
+# 规则（设计文档 §7.1 / §7.3）：
+#   1. default_provider 必须指向 providers/<provider_id>.toml（文件名 stem == provider_id）；
+#   2. 该 provider 文件必须 enabled = true（禁用态不能当默认）；
+#   3. default_model 必须存在于该 provider 文件的 [models] 表中。
+#
+# 校验失败一律 exit 11（ProviderTomlLoadError 伞形）。
+
+# 默认 provider_id。必填。
+# 取值：v1 白名单 26 家之一（见设计文档 §3.1）
+default_provider = "minimax"
+
+# 默认 model_id。必填。必须存在于 providers/minimax.toml 的 [models] 表中。
+default_model = "MiniMax-M3"

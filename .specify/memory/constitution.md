@@ -95,7 +95,7 @@
 
 ### 2.6 workspace 目录必填项（§立项书 4.6.1）
 
-**必须存在**：`instruction.md` / `provider.toml` / `tools/` / `mcp/mcp.json` / `skills/` / `memory/`
+**必须存在**：`instruction.md` / **`providers/`**（内含必填的 `providers/default.toml`）/ `tools/` / `mcp/mcp.json` / `skills/` / `memory/`
 
 **另由 `donkey init` 生成（donkey 自管，非用户材料）**：`<workspace>/manifest.json` —— D-01 的 workspace manifest，字段最少化（`version` / `name` / `created_at` / `donkey_version`）。它与**包内**的 `core/workspace/templates/manifest.json`（模板文件清单）**是两个不同的文件**，前者落在 workspace 根，后者落在 donkey 安装包内。
 
@@ -167,7 +167,14 @@
 | 语言 | Python 3.11+ | LangChain / LangGraph 官方语言；`tomllib` 内置 |
 | Agent 框架 | LangChain 1.x `create_agent` | 直接返回编译图，中间件插件化（`agents.md:19`） |
 | 图运行时 | LangGraph 当前稳定版 | 业内事实标准 |
-| **短期记忆** | `donkey init` 阶段 schema builder 创建 `memory/sessions.sqlite3`（**单文件双表**：SqliteSaver 自有 `checkpoints` / `writes` + donkey 自管 `sessions_metadata` + 2 索引）；运行期 `SqliteSaver` 落盘历史 + `core.api.new_session` 写元数据（INSERT，**不**重复 `CREATE TABLE`）；长期 / 知识库另列（`store.sqlite3` v3 / `knowledge.sqlite3` v3+ 占位）<br><br>**`sessions_metadata` 6 字段**：`thread_id` ↔ `title` + `created_at` / `updated_at` / `donkey_version` / `first_prompt`（N-09 / N-10 实现机制；详见 `harness/report/sessions_sqlite表结构一览.md` §2.2）<br><br>**`--force` = 恢复出厂设置**：删 + 重建 sqlite3（含 schema），用户须在 `--force` 前手动备份（`cp memory/*.sqlite3 /tmp/backup-*.sqlite3`）；"运行数据可选择性导出"仍生效——sqlite3 模板身份 ≠ 必须导出 | 唯一零配置本地文件选项；`sessions_metadata` 提供 title ↔ thread_id 映射 + 元数据持久化；F002-P2 `SqliteSchemaError` (exit 16) 通过 **5 项断言**（`PRAGMA table_info(checkpoints)` + `PRAGMA table_info(writes)` + `PRAGMA table_info(sessions_metadata)` 6 字段 + 2 索引名 + `PRAGMA integrity_check`）判定 schema 健康（口径以 `harness/report/sessions_sqlite表结构一览.md` §7 为准） |
+| **短期记忆** | `memory/sessions.sqlite3`（**单文件双表**）——init 阶段 schema builder 创建，运行时 `SqliteSaver` 落盘历史 + `core.api.new_session` 写元数据（INSERT，**不**重复 `CREATE TABLE`）；长期 / 知识库另列（`store.sqlite3` v3 / `knowledge.sqlite3` v3+ 占位）。**详见下方 §3.1.1** | 唯一零配置本地文件选项；`sessions_metadata` 提供 title ↔ thread_id 映射 + 元数据持久化；F002-P2 `SqliteSchemaError` (exit 16) 通过 **5 项断言**判定 schema 健康（口径以 `harness/report/sessions_sqlite表结构一览.md` §7 为准） |
+
+#### 3.1.1 短期记忆实现细则（`memory/sessions.sqlite3`）
+
+- **单文件双表**：`SqliteSaver` 自有 `checkpoints` / `writes`（短期 message 历史，`thread_id` 即主键）+ donkey 自管 `sessions_metadata`（元数据）；另加 2 个索引；
+- **`sessions_metadata` 6 字段**：`thread_id` ↔ `title` + `created_at` / `updated_at` / `donkey_version` / `first_prompt`（N-09 / N-10 实现机制；详见 `harness/report/sessions_sqlite表结构一览.md` §2.2）；
+- **写元数据不建表**：`core.api.new_session` 只 INSERT，**不**重复 `CREATE TABLE`（掩盖 init 缺失 / `--force` 后被破坏等异常）；
+- **`--force` = 恢复出厂设置**：删 + 重建 sqlite3（含 schema），用户须在 `--force` 前手动备份（`cp memory/*.sqlite3 /tmp/backup-*.sqlite3`）；"运行数据可选择性导出"仍生效——sqlite3 模板身份 ≠ 必须导出；
 | 长期记忆 | v1~v2：LangGraph `InMemoryStore`（进程重启即丢，仅开发 / 测试）；v3：自研 `SqliteStore`（仿照 PostgresStore） | LangGraph 官方无 SQLite Store（见 `Saver和Store.md` §2.1；自研 SqliteStore 详细 SQLite 端口三处适配：`namespace` 数组→JSON 字符串 + `value` JSONB→TEXT + GIN→json_each/FTS5，详见 `sessions_sqlite表结构一览.md` §3.3） |
 | MCP | LangChain `MCPAdapter` + `MCPConfig` dict | 官方推荐 / 跨编辑器通用 |
 | 配置格式 | TOML | LangChain / LangGraph 生态趋势 |
@@ -201,7 +208,7 @@
 
 ### 3.5 数据安全分级
 
-- `provider.toml` 各 provider 节的 `api_key`（per-provider 明文字段，**不读 env var**）**视为高敏感**；
+- `providers/*.toml` 的 `api_key` / `aws_secret_access_key` 等凭据字段（per-provider 明文字段，**不读 env var**）**视为高敏感**；
 - `donkey load` 异常 / 默认错误输出**自动脱敏**（不打印密钥明文）；
 - workspace 凭据由用户自负；donkey 不上传 workspace 内容。
 
@@ -300,7 +307,7 @@
 - `0` 是唯一正常返回码；任何 `> 0` 都视为失败；
 - `201+` 留给未来大版本 —— 每个大版本占 100 个码值（含 1 个正常返回）；
 - `donkey load` 段位起点 `11`（与 F002 域一致），9 项 hard error 占 `11-19`，`20` 留冗余；
-- **warning 不计入失败**（如 `provider.toml` 某 provider 节 `temperature` 软越界 / `openai-compatible` 的空 `api_key`）—— `--strict-warnings` 列入 v2 候选；
+- **warning 不计入失败**（如 `providers/*.toml` 的 `temperature` 软越界 / `openai-compatible` 的空 `api_key`）—— `--strict-warnings` 列入 v2 候选；
 - **"不读 env var"立场的边界**：该立场只约束**凭据**（`api_key` 等），**网络出口**仍由本机环境决定——httpx / openai SDK 默认读取 `ALL_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY` 等代理变量。donkey **不主动读、不主动写**这些变量，但必须在构造任何 client 前做一次**防御性检查**（识别 httpx 不认的 `socks://` scheme / 缺 `socksio` 扩展并降级），否则用户本机代理配置会让所有 provider 调用在**构造期**直接失败。详见 `harness/report/大模型toml参数设计.md` §9.4。
 
 **多错误优先级**：load 检查按 §立项书 5.5.3 检查清单顺序逐项执行，遇到第一个 hard error 立即返回 —— `exit_code` 取该错误码值，**不**累积多错误码。
@@ -316,13 +323,13 @@
 ### 4.6 验收标准（§立项书 3.2.3 + 3.5 + 9.3）
 
 **业务验收**：
-- **AC-1**：workspace 在 ≤ 100 MB 范围内，`donkey load` 通过率 100%（**不**设下限，`donkey init` 默认 workspace ≈ 10 KB 必须 100% 通过）；
+- **AC-1**：workspace 在 ≤ 100 MB 范围内，`donkey load` 通过率 100%（**不**设下限）。**通过口径 = "配置完成后的 workspace" 100% 通过**——配置完成 = 至少 1 个 provider 文件 `enabled = true` + `providers/default.toml` 填好 `default_provider` / `default_model` + 必填凭据到位；**出厂态豁免**——`donkey init` 刚生成的 workspace（26 个 provider stub 全部 `enabled = false`、零 enabled provider）**不纳入本条**，此时 `donkey load` 必然报 **exit 11**（`ProviderTomlFieldError`），且错误消息必须自带三步配置指引（详见 立项书 §3.2.3 ③ / README §3.2.1）。**豁免理由（硬）**：① 选 provider + 填凭据是**必须由用户决策**的问题（奥卡姆原则：error = 用户必须决策的硬问题），出厂态无从"通过"；② 零 enabled provider 会让**后续动态检查（模型连通性 exit 15）无模型可测** → 必须在静态检查阶段就报错，**不得降级为 warning**；
 - **AC-2**：workspace 迁移（zip → 解压 → 任意路径）后 `donkey run` 不出现路径相关错误；
 - **AC-3**：`donkey init` 幂等 —— 重复执行**不**破坏已存在文件（除非 `--force`）；
 - **AC-4**：换 workspace 后模型 / 工具 / Skills / 提示词全部随之切换，**无需重启 donkey**；
 - **AC-5**：v1 官方模板**不承诺**提供 diff 审阅 / 路径权限交互等引擎层能力。
 
-AC-1 ~ AC-5 全部通过；三套官方模板 workspace（通用型 / 编程型 / 技能型）各跑通 1 条主流程；cli / web / gui 三种客户端均通过 e2e。
+AC-1 ~ AC-5 全部通过；三套官方模板 workspace（通用型 / 编程型 / 技能型）各跑通 1 条主流程（**官方模板须先完成 provider 配置**——即满足 AC-1 的"配置完成"口径，否则出厂态 exit 11 属预期行为）；cli / web / gui 三种客户端均通过 e2e。
 
 **技术验收**：所有 `donkey` 子命令 exit code 与本宪法 §4.4 完全一致；引擎核心 LangGraph 图在 24 小时持续运行测试中无未捕获异常。
 
@@ -335,7 +342,7 @@ AC-1 ~ AC-5 全部通过；三套官方模板 workspace（通用型 / 编程型 
 
 ## 第 5 章 关键设计决策记录（ADR）
 
-> 本章沉淀立项书附录 F 中的 `[D-xx]` 决策；任何 `D-xx` 一经纳入**不**可删除，仅可修订。
+> 本章沉淀立项书附录 F 中的 `[D-xx]` 决策；任何 `D-xx` 一经纳入**不**可删除，仅可修订。**本章是 ADR 的唯一权威源**（立项书附录 F 为镜像摘要，冲突时以本章为准）。
 
 | 编号 | 决策 | 来源 |
 |---|---|---|
@@ -352,6 +359,9 @@ AC-1 ~ AC-5 全部通过；三套官方模板 workspace（通用型 / 编程型 
 | **[D-11]** | donkey 的 `store.sqlite3` / `knowledge.sqlite3` v1 仅占位空文件——不建占位表、不挂 store、donkey 本体不读；v3 SqliteStore 由 Maintainer 启动时实施 | 立项书 §4.10 TD-02 |
 | **[D-12]** | F002 load 9 项硬检查失败 → `exit code ≠ 0`，但**不修改** workspace 中任何文件（"load 失败不改 workspace"原则，N-06） | N-06 |
 | **[D-13]** | 提供 fork 指南（配置边界 / 适配层说明 / 扩展点清单）——"改引擎请 fork"是 §1.1 项目身份的核心 | 立项书 §1.1 |
+| **[D-14]** | **AC-1 的出厂态豁免**——`donkey load` 的"100% 通过"口径 = **配置完成后**的 workspace；`donkey init` 刚生成的出厂态（26 个 provider stub 全部 `enabled = false`、零 enabled provider）**豁免**，必然报 exit 11（`ProviderTomlFieldError`）并自带三步配置指引。**零 enabled 不得降级为 warning**：它会让后续动态检查（模型连通性 exit 15）无模型可测 → 必须在静态检查阶段就失败 | 立项书 §3.2.3 ③ + README §3.2.1 |
+| **[D-15]** | **subagent 永不纳入**——宪法 N-02"agent = 人"是项目身份级哲学，**任何版本号都不为其预留功能位**（v1.5.3 版本演进规划 / §5.4 甘特图中均不得出现 subagent 交付物） | N-02 + 立项书 §1.5.3 / §4.10 TD-05 / §10.3.2 Q-05 |
+| **[D-16]** | **v1 LLM 接入零自研解析层**——26 个 provider 全部复用 LangChain 官方类（唯一抽象 = `ReusableProvider` 薄包装）；`provider_id` → LangChain 类的翻译由 **donkey facade** 完成，**禁止**把 TOML 的 `default_provider` 直接喂 `init_chat_model`；donkey 在解析层的唯一职责是**配置层严格校验**（per-provider schema + F002 load 校验，exit 11 伞形）。配置布局 = `providers/` 目录 + 一 provider 一文件 + `enabled` 开关 | `大模型toml参数设计.md` §2 / §7 / §15 |
 
 ---
 
@@ -370,7 +380,7 @@ AC-1 ~ AC-5 全部通过；三套官方模板 workspace（通用型 / 编程型 
 2. **Maintainer 批准**：仅 Maintainer（yangjiacheng）有最终批准权；
 3. **影响评估**：列出受影响的 spec / plan / tasks / 代码 / 文档清单；
 4. **迁移计划**：若影响现有用户，须附迁移路径；
-5. **版本号 +1**：修订后宪法版本号按 SemVer 递增。
+5. **记录修订**：修订的动机与结论写入第 5 章 ADR（`[D-xx]`，编号只增不删、不可删除既有条目）；**本宪法不设版本号**——它在 v1 开发期随时可能修订，版本化由 ADR 编号 + git 历史承担。
 
 ### 6.3 例外
 
@@ -386,6 +396,7 @@ AC-1 ~ AC-5 全部通过；三套官方模板 workspace（通用型 / 编程型 
 - 运行时开发指引：`harness/features/立项书.md`（本宪法的唯一源文档）；
 - Phase 进度与映射总表：`harness/features/README.md`（§3 一览总表 / §4-§9 详细设计 / §11 段位速查表 / §12 提示词文件落地约定，**含 §1.5 4 术语表**——Phase / 段位 / 子段 / Error class 严格分层在此表定义）；
 - Speckit 工作流：`harness/prompt/speckit.md`；
+- **LLM 配置 schema 权威**：`harness/report/大模型toml参数设计.md`（`providers/` 目录布局 / 26 家白名单 / per-provider 字段 / `enabled` 开关 / 三档鉴权 / exit 11 校验清单）；
 - 中间件速查：`harness/report/LangChain内置中间件速查表.md`；
 - Skills 自研依据：`harness/report/关于subagent的实现方式.md`、`harness/report/内置工具应该自己实现还是调用中间件.md`；
 - 长期记忆依据（含 `sessions_metadata` 表设计蓝本）：`harness/report/Saver和Store.md`；

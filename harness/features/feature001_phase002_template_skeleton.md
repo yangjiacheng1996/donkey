@@ -16,20 +16,20 @@
 | **核心库 API** | `core.api.init_workspace(path, name=None, force=False) -> InitResult` |
 | **Phase 编号** | F001-P2 |
 | **Phase 英文名** | `template_skeleton` |
-| **Phase 中文描述** | 幂等生成 workspace 模板骨架（六大必填目录 + 必填文件 + 支撑文件）+ workspace manifest 写入 |
+| **Phase 中文描述** | 幂等生成 workspace 模板骨架（五大必填目录 + 必填文件 + 支撑文件）+ workspace manifest 写入 |
 | **段位** | F001 段位 1–10；本 Phase 占用 F001 子段 2（exit 3） |
 | **已用 exit code** | 3（`TemplateGenerationError`） |
 | **预留 exit code** | 5–10（留给 v1.x 试运行期新错误） |
 | **本 Phase 不占用的 exit code** | 1 / 2（F001-P1 已用）、4（F001-P3 用）、5–10 |
 | **对应验收脚本** | `tests/e2e/phase/verify_phase_f001_p2.py` |
-| **闭环复杂度（断言数）** | 中（15 断言） |
+| **闭环复杂度（断言数）** | 中（14 断言） |
 | **准入条件** | F001-P1 退出条件全部满足 + F001-P1 抛出的 2 个异常类已通过单元测试 |
 
 ---
 
 ## 1. Phase 目标声明（一句话）
 
-实现 `donkey init` 的模板骨架幂等生成：在 workspace 内落地六大必填目录（`tools/` / `mcp/` / `skills/` / `memory/`）+ 必填文件（`instruction.md` / `provider.toml` / `mcp/mcp.json` / `skills/example/SKILL.md`）+ 支撑文件（README 系列 / `.gitignore`）+ **三个 sqlite3 模板**（`memory/sessions.sqlite3` schema-built（SqliteSaver + sessions_metadata）/ `memory/store.sqlite3` 空文件占位（schema 推迟 v3 SqliteStore 实施）/ `memory/knowledge.sqlite3` 空文件占位（schema 推迟 RAG 引擎选型）；详见 §4.7.6 schema builder），并维护 workspace manifest。本 Phase **不**生成 3 个内置 `@tool` 文件（推迟到 F001-P3），**不**生成 Skills example 的 Level 2/3 内容（推迟到 F001-P3），**不**做"init 后跑 F002 静态检查"（F002 域）。
+实现 `donkey init` 的模板骨架幂等生成：在 workspace 内落地五大必填目录（`tools/` / `mcp/` / `skills/` / `memory/` / **`providers/`**）+ 必填文件（`instruction.md` / **`providers/default.toml`** / `mcp/mcp.json` / `skills/example/SKILL.md`）+ **`providers/` 下的 26 个 provider stub + `providers/README.md` 目录快照**+ 支撑文件（README 系列 / `.gitignore`）+ **三个 sqlite3 模板**（`memory/sessions.sqlite3` schema-built（SqliteSaver + sessions_metadata）/ `memory/store.sqlite3` 空文件占位（schema 推迟 v3 SqliteStore 实施）/ `memory/knowledge.sqlite3` 空文件占位（schema 推迟 RAG 引擎选型）；详见 §4.7.6 schema builder），并维护 workspace manifest。本 Phase **不**生成 3 个内置 `@tool` 文件（推迟到 F001-P3），**不**生成 Skills example 的 Level 2/3 内容（推迟到 F001-P3），**不**做"init 后跑 F002 静态检查"（F002 域）。
 
 ---
 
@@ -115,8 +115,8 @@ workspace 内的所有相对路径引用**以 workspace 绝对路径为唯一根
 | **exit code 常量** | `donkey/core/exit_codes.py` | 已定义 `EXIT_CODE_OK` / `EXIT_CODE_PATH_NOT_FOUND` / `EXIT_CODE_PATH_PERMISSION`（F001-P1 用）。本 Phase 在此文件**追加**定义 `EXIT_CODE_TEMPLATE_GENERATION = 3`。 |
 | **异常类层次** | `donkey/core/exceptions.py` | 已定义 `DonkeyError` / `WorkspaceInitError` / `PathNotFoundError` / `PathPermissionError`（F001-P1 用）。本 Phase 在此文件**追加**定义 `TemplateGenerationError(WorkspaceInitError)` —— 对应 exit code 3。 |
 | **CLI 异常映射表** | `donkey/cli/cli_client.py` | 已存在 `_EXCEPTION_TO_EXIT_CODE` 映射表。本 Phase 在表中**追加** `TemplateGenerationError: EXIT_CODE_TEMPLATE_GENERATION`（仅 1 行）。 |
-| **模板清单** | `donkey/core/workspace/templates/manifest.json` | 已定义 schema（version + entries，每 entry 含 `path` + 可选 `format`：`markdown` / `toml` / `json` / `python` / `text` / `directory` / `sqlite3` 共 7 种）。**P1 阶段已有 3 条**（`instruction.md` / `provider.toml` / `mcp/mcp.json`）；**本 Phase 追加 15 条 → 累计 18 条**（追加方式：在原 `entries` 数组末尾 push，**不**修改 P1 已有条目）。 |
-| **模板源文件** | `donkey/core/workspace/templates/{entry['path']}.txt` | 已就位（P1 的 3 个 .txt 占位）+ 本 Phase 新增 15 个 .txt 源。**源文件路径规则**：`templates/{entry['path']}.txt`——与 manifest entry 的 `path` 一一对应（如 `templates/mcp/mcp.json.txt` / `templates/memory/README.md.txt`）。本 Phase 读取这些 .txt 内容并写入 workspace 对应位置；初始正文见 §4.7。 |
+| **模板清单** | `donkey/core/workspace/templates/manifest.json` | 已定义 schema（version + entries，每 entry 含 `path` + 可选 `format`：`markdown` / `toml` / `json` / `python` / `text` / `directory` / `sqlite3` 共 7 种）。**P1 阶段已有 3 条**（`instruction.md` / `providers/default.toml` / `mcp/mcp.json`）；**本 Phase 追加 43 条 → 累计 46 条**（追加方式：在原 `entries` 数组末尾 push，**不**修改 P1 已有条目）。 |
+| **模板源文件** | `donkey/core/workspace/templates/{entry['path']}.txt` | 已就位（P1 的 3 个 .txt 占位）+ 本 Phase 新增 34 个 .txt 源（7 个文本模板 + `providers/README.md` + 26 个 provider stub；目录条目与 3 个 sqlite3 模板**不需要** .txt 源）。**源文件路径规则**：`templates/{entry['path']}.txt`——与 manifest entry 的 `path` 一一对应（如 `templates/mcp/mcp.json.txt` / `templates/memory/README.md.txt`）。本 Phase 读取这些 .txt 内容并写入 workspace 对应位置；初始正文见 §4.7。 |
 | **sqlite3 schema builders** | `donkey/core/workspace/sqlite3_templates.py` | **本 Phase 新建**模块。本 Phase 入口条件**不要求**该模块已存在——本 Phase 自身将其创建（`build_sessions_sqlite` / `build_store_sqlite` / `build_knowledge_sqlite` 三函数），并附 3 个单测。 |
 
 
@@ -139,18 +139,38 @@ from donkey.core.workspace.sqlite3_templates import (
     build_knowledge_sqlite,
 )
 
+# 包内模板根目录（默认值）；单元测试可注入临时目录，**不碰安装包**
+DEFAULT_TEMPLATES_ROOT = Path(__file__).parent / "templates"
+
+
+def load_template_manifest(manifest_path: Path | None = None) -> list[dict]:
+    """加载模板清单（**P2 拥有**——P1 不加载清单，见 F001-P1 §4.2）。
+
+    行为：
+    1. manifest_path 缺省取 DEFAULT_TEMPLATES_ROOT / "manifest.json"
+    2. 用 json.loads 解析；解析失败 / 文件不存在 / schema 非法 →
+       raise TemplateGenerationError（**不是** PathNotFoundError）
+       ——理由：用户修复动作是"重装 donkey"，与 exit 1 的"建目录 / 换路径"不同，
+       按奥卡姆不能合并到同一码值（详见 F001-P1 §4.2 的归类说明）
+    3. 校验 schema：version 为 int；entries 为 list；每个 entry 含 path（str）
+    4. 返回 entries 列表（不修改）
+
+    返回：模板条目列表
+    """
+
 
 def render_templates(workspace_path: Path,
                      name: str,
                      force: bool,
-                     manifest_entries: list[dict]) -> tuple[int, int]:
+                     manifest_entries: list[dict],
+                     templates_root: Path | None = None) -> tuple[int, int]:
     """根据 manifest 清单幂等生成模板骨架。
 
     行为：
     1. 遍历 manifest_entries（每个 entry 含 path + 可选 format）：
        a. 目标路径 = workspace_path / entry['path']
        b. **根据 format 分派处理**：
-          - `markdown` / `toml` / `json` / `python` / `text`：源模板 = donkey/core/workspace/templates/{entry['path']}.txt
+          - `markdown` / `toml` / `json` / `python` / `text`：源模板 = (templates_root or DEFAULT_TEMPLATES_ROOT) / f"{entry['path']}.txt"
             - 不传 force：目标不存在则写入；已存在则**完全不动**
             - 传 force：unlink 后重写
           - `directory`：处理目录条目（mkdir / 递归清空内列出的文件）
@@ -177,7 +197,7 @@ def init_workspace_inner(path: str | Path,
 
     行为：
     1. 调 validate_init_request(path, name, force) → (abs_path, resolved_name, force)
-    2. 调 load_template_manifest() → manifest_entries
+    2. 调 load_template_manifest() → manifest_entries（清单损坏 → TemplateGenerationError）
     3. abs_path.mkdir(parents=True, exist_ok=True)   # 建根目录（P1 语义保留）
     4. 调 render_templates(abs_path, resolved_name, force, manifest_entries) → (created, skipped)
     5. 调 write_workspace_manifest(abs_path, resolved_name, force) → 写 workspace manifest
@@ -191,7 +211,8 @@ def init_workspace_inner(path: str | Path,
 
 - `render_templates` 与 `init_workspace_inner` 必须是新追加的函数，**不**修改 P1 已实现的 4 个函数；
 - **`format` 字段分派表**：除 `markdown` / `toml` / `json` / `python` / `text` / `directory` 外，**新增** `sqlite3` —— 触发 schema builder（§4.7.6）而非文本复制；schema builder 内部抛错统一归到 `TemplateGenerationError`；
-- 异常归类（合并四项）：**源 .txt 缺失**（如 `templates/instruction.md.txt` 被用户删除）+ **渲染失败**（如 .txt 内容不合法）+ **文件写入失败**（如磁盘满、权限中途撤销）+ **sqlite3 schema 构造失败**（如 SqliteSaver.setup() 抛错 / sessions_metadata 建表失败）→ 四者**统一**抛 `TemplateGenerationError`（合并报错，理由：用户修复动作相同——重装 donkey / 检查权限 / 重试 init；按奥卡姆剃刀合并到 1 个 exit code）；
+- 异常归类（**合并五项**）：**模板清单损坏 / schema 非法**（如 `manifest.json` 不是合法 JSON）+ **源 .txt 缺失**（如 `templates/instruction.md.txt` 被用户删除）+ **渲染失败**（如 .txt 内容不合法）+ **文件写入失败**（如磁盘满、权限中途撤销）+ **sqlite3 schema 构造失败**（如 SqliteSaver.setup() 抛错 / sessions_metadata 建表失败）→ 五者**统一**抛 `TemplateGenerationError`（合并报错，理由：用户修复动作相同——重装 donkey / 检查权限 / 重试 init；按奥卡姆剃刀合并到 1 个 exit code）；
+- **`templates_root` 可注入**（默认 = 包内 templates 目录）：让**单元测试**能用临时目录构造"源 .txt 缺失" / "清单损坏"两个分支，**不需要破坏已安装包**（黑盒 verify 脚本不测这两个分支，见 §6.11 注）；
 - 目录处理：`manifest.json` 中 `skills/example/` 这种目录 entry 应被识别为"目录条目"（spec 应明确 schema 中如何标记——建议 `format: "directory"` 或单独的 `type: "directory"` 字段），`render_templates` 据此区分目录 vs 文件；
 - **绝不允许** `--force` 触碰 manifest 外的路径（用户的 `media/` / 自定义 `tools/my_tool.py` 等）——单元测试必须验证这一点；**sqlite3 三模板已被 manifest 收纳，`--force` 重置它们是预期行为**（用户已在 `memory/README.md` §4.7.5 模板正文中被告知备份责任）。
 
@@ -299,10 +320,12 @@ EXIT_CODE_TEMPLATE_GENERATION = 3  # TemplateGenerationError
 class TemplateGenerationError(WorkspaceInitError):
     """exit code: 3
 
-    模板骨架生成失败（合并项）：
+    模板骨架生成失败（合并五项）：
+    - 模板清单损坏 / schema 非法（如 manifest.json 不是合法 JSON）
     - 源 .txt 模板缺失（如 templates/instruction.md.txt 被删除）
     - 渲染失败（如 .txt 内容格式损坏）
     - 文件写入失败（如磁盘满、权限中途撤销）
+    - sqlite3 schema 构造失败（如 SqliteSaver.setup() 抛错）
 
     用户修复动作相同：重装 donkey / 检查权限 / 重试 init；按奥卡姆剃刀合并到 1 个 exit code。
     """
@@ -336,31 +359,83 @@ P1 阶段 manifest（3 条）+ .txt 占位已就位；P2 阶段 spec **必须**�
 
 > **`{{ workspace_name }}` 占位符**：由 `render_templates` 在渲染时替换为 `--name`（缺省取 `path.basename()`）。F001-P2 §6.5 的"--name 注入"断言依赖此占位符。
 
-#### 4.7.2 `provider.toml.txt`
+#### 4.7.2 `providers/` 模板（`default.toml` + `README.md` + 26 个 provider stub）
+
+> **v1 布局 = `providers/` 目录，一 provider 一文件**（取代 v0 草案的单文件 `provider.toml` + 26 个 provider 节）。契约详见 `harness/report/大模型toml参数设计.md §7` 与立项书 §4.6.2。
+
+##### 4.7.2.1 `providers/default.toml.txt`（**保留名**，必填）
 
 ```toml
-# {{ workspace_name }} —— 模型配置
-# 由 `donkey init` 生成；请把 REPLACE_ME 换成你真实的 API key。
-# 字段契约见 harness/report/大模型toml参数设计.md §7-§8 与立项书 §4.6.2。
+# {{ workspace_name }} —— 全局默认（providers/default.toml）
+# 由 `donkey init` 生成；请把下面两个字段填成你实际要用的 provider / model。
+# 字段契约见 harness/report/大模型toml参数设计.md §7.2-§7.3 与立项书 §4.6.2。
 
-# 顶层：全局默认（必填）
-default_provider = "openai"
-default_model = "gpt-4o"
+# 默认 provider_id。必填。
+# 必须指向 providers/<provider_id>.toml，且该文件的 enabled = true。
+# 取值见 providers/README.md（v1 白名单 26 家）。
+default_provider = ""
 
-[openai]
-api_key = "REPLACE_ME"   # 高敏感字段；TOML 明文，donkey 不读环境变量
-api_host = ""            # 选填；自定义 OpenAI 兼容端点
-temperature = 0.2
-max_tokens = 128000
-
-[openai.models.gpt-4o]
-# 模型级参数覆盖 provider 默认
-temperature = 0.2
+# 默认 model_id。必填。
+# 必须存在于 providers/<default_provider>.toml 的 [models] 表中。
+default_model = ""
 ```
 
-> **占位符 `REPLACE_ME` 的理由（AC-1 静态口径，见立项书 §3.2.3）**：C 档云端 provider 的**空** `api_key` 在 F002 load 阶段是**硬错 exit 11**（调研 §9.2）——若出厂模板写 `api_key = ""`，则"刚 init 完的默认 workspace"连**静态检查**都过不了。用**非空占位符**则：① 静态检查（exit 11-14）100% 通过；② 用户替换成真实 key 后动态连通性检查（exit 15）才通过——未替换时 load 报 exit 15 并提示"请先把 provider.toml 中的 REPLACE_ME 换成真实 API key"。
+##### 4.7.2.2 `providers/README.md.txt`（目录快照）
+
+```markdown
+# providers/ —— 模型供应商配置目录
+
+**一 provider 一文件**：文件名 = provider_id（如 `openai.toml` / `minimax.toml`）。
+
+| 文件 | 供应商 | 启用方式 |
+|---|---|---|
+| `openai.toml` | OpenAI | 改 `enabled = true` + 填 `api_key` |
+| `anthropic.toml` | Anthropic Claude | 同上 |
+| ... | ... | ... |
+| `minimax.toml` | MiniMax（OpenAI 兼容） | 同上 |
+
+**启用三步**：① 把目标文件的 `enabled` 改成 `true` → ② 填入真实凭据（`api_key` / `aws_*`）→ ③ 在 `providers/default.toml` 设 `default_provider` + `default_model`。
+
+> 未启用的文件**完全惰性**：不校验字段、不要求填 `api_key`、不参与连通性检查。
+> 文件名必须逐字符等于 provider_id（拼错 → `donkey load` 报 exit 11）。
+```
+
+##### 4.7.2.3 26 个 provider stub（`providers/<provider_id>.toml.txt`）
+
+**每个 stub 一个 .txt 源文件**，内容取自 `harness/report/大模型toml参数设计.md §8.3` 的对应小节（**逐字搬运，不自行发挥**）。以 `providers/openai.toml.txt` 为例：
+
+```toml
+# providers/openai.toml —— OpenAI（含 o 系列推理模型）
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "openai" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+api_key = ""                  # 高敏感字段；TOML 明文，donkey 不读环境变量
+api_host = ""                 # 选填；自定义 OpenAI 兼容端点
+timeout = 60
+max_retries = 6
+temperature = 1.0
+max_tokens = 16384
+
+[models.gpt-4o]
+temperature = 1.0
+```
+
+**26 个 stub 源文件清单**（provider_id → .txt 源文件）：
+
+`openai` / `anthropic` / `google` / `ollama` / `xai` / `mistral` / `qwen` / `deepseek` / `doubao` / `kimi` / `zhipu` / `minimax` / `tencent` / `xiaomi` / `stepfun` / `openai-compatible` / `meta` / `bedrock` / `groq` / `fireworks` / `together` / `cohere` / `perplexity` / `databricks` / `cerebras` / `openrouter`
+
+> **为什么不再用 `api_key = "REPLACE_ME"` 占位符**（v0 草案的做法）：C 档云端 provider 的**空** `api_key` 在 F002 load 阶段是**硬错 exit 11**（调研 §9.2）——v0 靠占位符骗过静态检查。v1 引入 `enabled` 开关后，**未启用的 provider 文件完全惰性**（连空 key 都不检查），占位符自然被废除：stub 的 `api_key = ""` 是合法出厂态；用户启用后若忘记填 key → **exit 11**（比 v0 的 exit 15 更早、更准），错误消息按 AC-1 要求给出配置指引。
 >
-> 完整 per-provider schema（含 26 家 provider 各自的专属字段）见 `harness/report/大模型toml参数设计.md` §7-§8 与立项书 §4.6.2。
+> **出厂态的 `donkey load` 行为**：`providers/` 下 26 个 stub 全 `enabled = false` + `default.toml` 为空 → **零 enabled provider → exit 11**（`ProviderTomlFieldError`），错误消息必须给出"① 启用某个 provider → ② 填凭据 → ③ 填 `providers/default.toml`"三步指引。详见立项书 §3.2.3 AC-1 静态口径修订。
+>
+> 完整 per-provider schema（含 26 家 provider 各自的专属字段）见 `harness/report/大模型toml参数设计.md` §8.3 与立项书 §4.6.2。
 
 #### 4.7.3 `mcp/mcp.json.txt`
 
@@ -450,16 +525,16 @@ spec 必须列出每个文件的初始内容（建议长度 5–20 行）：
 - **`--force` 行为**：`render_templates` 先 `unlink` 旧文件再调 builder——确保 schema 干净（不接受"保留 schema 只清数据"的污染路径）；
 - **上游 schema 不由 donkey 维护**：`checkpoints` / `writes` 的列定义由 `langgraph-checkpoint-sqlite` 决定（详见 `harness/report/sessions_sqlite表结构一览.md` §2.1），donkey 只做"表存在 + 列存在"级别的健康检查。
 
-#### 4.7.7 模板清单追加条目（P2：+15 条 → 累计 18 条）
+#### 4.7.7 模板清单追加条目（P2：+43 条 → 累计 46 条）
 
-`donkey/core/workspace/templates/manifest.json` 在 P1 已有 3 条基础上**追加**如下 15 条（追加操作 = "在原 `entries` 数组末尾 push"，**不**修改 P1 已有条目）：
+`donkey/core/workspace/templates/manifest.json` 在 P1 已有 3 条基础上**追加**如下 43 条（追加操作 = "在原 `entries` 数组末尾 push"，**不**修改 P1 已有条目）：
 
 ```json
 {
   "version": 1,
   "entries": [
     {"path": "instruction.md", "format": "markdown"},
-    {"path": "provider.toml", "format": "toml"},
+    {"path": "providers/default.toml", "format": "toml"},
     {"path": "mcp/mcp.json", "format": "json"},
     {"path": "skills/example/SKILL.md", "format": "markdown"},
     {"path": "README.md", "format": "markdown"},
@@ -468,11 +543,39 @@ spec 必须列出每个文件的初始内容（建议长度 5–20 行）：
     {"path": "skills/README.md", "format": "markdown"},
     {"path": "memory/README.md", "format": "markdown"},
     {"path": ".gitignore", "format": "text"},
+    {"path": "providers/README.md", "format": "markdown"},
+    {"path": "providers/openai.toml", "format": "toml"},
+    {"path": "providers/anthropic.toml", "format": "toml"},
+    {"path": "providers/google.toml", "format": "toml"},
+    {"path": "providers/ollama.toml", "format": "toml"},
+    {"path": "providers/xai.toml", "format": "toml"},
+    {"path": "providers/mistral.toml", "format": "toml"},
+    {"path": "providers/qwen.toml", "format": "toml"},
+    {"path": "providers/deepseek.toml", "format": "toml"},
+    {"path": "providers/doubao.toml", "format": "toml"},
+    {"path": "providers/kimi.toml", "format": "toml"},
+    {"path": "providers/zhipu.toml", "format": "toml"},
+    {"path": "providers/minimax.toml", "format": "toml"},
+    {"path": "providers/tencent.toml", "format": "toml"},
+    {"path": "providers/xiaomi.toml", "format": "toml"},
+    {"path": "providers/stepfun.toml", "format": "toml"},
+    {"path": "providers/openai-compatible.toml", "format": "toml"},
+    {"path": "providers/meta.toml", "format": "toml"},
+    {"path": "providers/bedrock.toml", "format": "toml"},
+    {"path": "providers/groq.toml", "format": "toml"},
+    {"path": "providers/fireworks.toml", "format": "toml"},
+    {"path": "providers/together.toml", "format": "toml"},
+    {"path": "providers/cohere.toml", "format": "toml"},
+    {"path": "providers/perplexity.toml", "format": "toml"},
+    {"path": "providers/databricks.toml", "format": "toml"},
+    {"path": "providers/cerebras.toml", "format": "toml"},
+    {"path": "providers/openrouter.toml", "format": "toml"},
     {"path": "tools", "format": "directory"},
     {"path": "mcp", "format": "directory"},
     {"path": "skills", "format": "directory"},
     {"path": "skills/example", "format": "directory"},
     {"path": "memory", "format": "directory"},
+    {"path": "providers", "format": "directory"},
     {"path": "memory/sessions.sqlite3", "format": "sqlite3"},
     {"path": "memory/store.sqlite3", "format": "sqlite3"},
     {"path": "memory/knowledge.sqlite3", "format": "sqlite3"}
@@ -480,12 +583,12 @@ spec 必须列出每个文件的初始内容（建议长度 5–20 行）：
 }
 ```
 
-> **追加条数核对**：P2 追加 **15** 条 = 7 个文本模板（`skills/example/SKILL.md` / `README.md` / `tools/README.md` / `mcp/README.md` / `skills/README.md` / `memory/README.md` / `.gitignore`）+ 5 个目录条目（`tools` / `mcp` / `skills` / `skills/example` / `memory`）+ 3 个 sqlite3 模板；叠加 P1 的 3 条 = **累计 18 条**。F001-P3 追加 7 条后累计 **25 条**（见 F001-P3 §4.7）。
+> **追加条数核对**：P2 追加 **43** 条 = 7 个文本模板（`skills/example/SKILL.md` / `README.md` / `tools/README.md` / `mcp/README.md` / `skills/README.md` / `memory/README.md` / `.gitignore`）+ **`providers/` 的 27 个模板（`providers/README.md` + 26 个 provider stub）** + 6 个目录条目（`tools` / `mcp` / `skills` / `skills/example` / `memory` / **`providers`**）+ 3 个 sqlite3 模板；叠加 P1 的 3 条 = **累计 46 条**。F001-P3 追加 7 条后累计 **53 条**（见 F001-P3 §4.7）。
 
 
 ### 4.9 单元测试（`tests/unit/test_template_skeleton.py`）
 
-**spec 必须列出**下列单测用例（**至少 12 个**）：
+**spec 必须列出**下列单测用例（**至少 14 个**）：
 
 | 用例 | 输入 | 期望 |
 |---|---|---|
@@ -495,7 +598,9 @@ spec 必须列出每个文件的初始内容（建议长度 5–20 行）：
 | `test_render_force_directory` | force=True，`skills/example/` 存在且含子文件 | 递归删除子文件后重建 |
 | `test_render_skip_user_content` | workspace 含 `media/`、`tools/my_tool.py`（不在 manifest） | `--force` 不删这些 |
 | `test_render_force_rebuilds_sqlite3` | workspace 含 `memory/sessions.sqlite3`（写入假数据）+ `media/` | `--force` 重建 sqlite3（含 schema 重建，数据清空）+ media/ 不动 |
-| `test_render_template_source_missing` | 手动删除 `templates/instruction.md.txt` + force | raise `TemplateGenerationError` |
+| `test_render_template_source_missing` | **临时目录** templates_root + 一个指向不存在 .txt 的 entry + force | raise `TemplateGenerationError`（**不碰安装包**——templates_root 注入 tmp 目录） |
+| `test_load_template_manifest_corrupted` | tmp 目录下写坏的 manifest.json（非合法 JSON） | raise `TemplateGenerationError`（exit 3，**不是** PathNotFoundError） |
+| `test_load_template_manifest_schema_invalid` | tmp 目录下 entries 不是 list / entry 缺 path | raise `TemplateGenerationError` |
 | `test_render_permission_denied_midway` | workspace 在写到一半时权限被撤销 | raise `TemplateGenerationError`（合并项） |
 | `test_manifest_write_new` | 新 workspace | 写入 manifest.json |
 | `test_manifest_skip_existing_no_force` | manifest 已存在，无 force | 不覆盖；保留 created_at |
@@ -504,7 +609,7 @@ spec 必须列出每个文件的初始内容（建议长度 5–20 行）：
 
 ### 4.10 verify 脚本（`tests/e2e/phase/verify_phase_f001_p2.py`）
 
-**黑盒测试**（禁止 import `donkey.*` 业务代码；只跑 `subprocess.run(["donkey", ...])`），15 个断言对应 §6 退出条件。
+**黑盒测试**（禁止 import `donkey.*` 业务代码；只跑 `subprocess.run(["donkey", ...])`），14 个断言对应 §6 退出条件（§6.11 的两个异常分支由**单元测试**覆盖，见该节说明）。
 
 ---
 
@@ -512,17 +617,30 @@ spec 必须列出每个文件的初始内容（建议长度 5–20 行）：
 
 | Error class（`donkey.core.exceptions`） | exit code | 触发条件 | 报错概率 |
 |---|---|---|---|
-| `TemplateGenerationError` | **3** | 模板骨架生成失败（**合并四项**：源 .txt 缺失 + 渲染失败 + 文件写入失败 + **sqlite3 schema 构造失败**）。用户修复动作相同：重装 donkey / 检查权限 / 重试 init；按奥卡姆剃刀合并到 1 个码值 | 低（init 阶段罕见） |
+| `TemplateGenerationError` | **3** | 模板骨架生成失败（**合并五项**：模板清单损坏 / schema 非法 + 源 .txt 缺失 + 渲染失败 + 文件写入失败 + **sqlite3 schema 构造失败**）。用户修复动作相同：重装 donkey / 检查权限 / 重试 init；按奥卡姆剃刀合并为 1 个码值 | 低（init 阶段罕见） |
 | exit 4 | （预留） | `BuiltinToolGenerationError` —— 段位 1-10 子段 3，由下游 F001-P3 (`builtin_tools`) 分配 | — |
 | exit 5–10 | （预留） | 留给 v1.x 试运行期新错误 | — |
 
-**奥卡姆剃刀原则**：本 Phase 仅占 1 个码值（3）。源缺失 / 渲染失败 / 写入失败 / **sqlite3 schema 构造失败**四者对用户而言都是"重装 donkey / 检查权限 / 重试 init"，合并为单一 `TemplateGenerationError` —— 若分开分配会浪费 3 个码值给稀有错误。
+**奥卡姆剃刀原则**：本 Phase 仅占 1 个码值（3）。清单损坏 / 源缺失 / 渲染失败 / 写入失败 / **sqlite3 schema 构造失败**五者对用户而言都是“重装 donkey / 检查权限 / 重试 init”，合并为单一 `TemplateGenerationError` —— 若分开分配会浪费 4 个码值给稀有错误。**与 exit 1 的边界**：exit 1（`PathNotFoundError`）= “PATH 父目录不存在 / 路径解析失败”，修复动作是**建目录 / 换路径**；本码修复动作是**重装 donkey**——两者修复动作不同，故**不合并**（模板清单加载因此从 F001-P1 推迟到本 Phase）。
 
 ---
 
 ## 6. 退出条件（Exit Gate）
 
-**`tests/e2e/phase/verify_phase_f001_p2.py` 必须跑通以下 15 个断言**（顺序固定，每条独立可测）：
+**`tests/e2e/phase/verify_phase_f001_p2.py` 必须跑通以下 14 个断言**（顺序固定，每条独立可测）：
+
+> **注：源 .txt 缺失 / 清单损坏 → exit 3（由单元测试覆盖，黑盒不测）**
+
+> **为什么不放进黑盒 verify 脚本**：这两个分支的触发方式是"**包内** `templates/manifest.json` 损坏 / `templates/*.txt` 源缺失"——黑盒脚本若要触发，只能**破坏已安装包**（改完再还原），会污染安装目录、CI 需串行、异常中断即损坏安装。
+> >
+> **替代方案（已落到 §4.1 / §4.9）**：`render_templates` 的 `templates_root` 与 `load_template_manifest` 的 `manifest_path` **在库层可注入**，单元测试用临时目录构造这两个分支，**完全不碰安装包**：
+> >
+> | 分支 | 覆盖位置 | 触发方式 |
+> |---|---|---|
+> | 源 .txt 缺失 → exit 3 | §4.9 `test_render_template_source_missing` | 注入 tmp templates_root + 指向不存在 .txt 的 entry |
+> | 清单损坏 / schema 非法 → exit 3 | §4.9 `test_load_template_manifest_corrupted` / `test_load_template_manifest_schema_invalid` | tmp 目录下写坏的 manifest.json |
+> >
+> **verify 脚本断言数因此为 14**（不含本节）。
 
 ### 6.1 场景 1：全新创建 → exit 0 + 目录树一致 + 三个 sqlite3 模板就位
 
@@ -534,7 +652,7 @@ def test_scenario_1_new_workspace_full_tree(tmp_path):
     assert result.returncode == 0
     # 必填文件
     assert (ws / "instruction.md").exists()
-    assert (ws / "provider.toml").exists()
+    assert (ws / "providers" / "default.toml").exists()
     assert (ws / "README.md").exists()
     assert (ws / ".gitignore").exists()
     # 必填目录
@@ -542,6 +660,15 @@ def test_scenario_1_new_workspace_full_tree(tmp_path):
     assert (ws / "mcp").is_dir()
     assert (ws / "skills").is_dir()
     assert (ws / "memory").is_dir()
+    assert (ws / "providers").is_dir()
+    # providers/ 目录快照 + 26 个 provider stub（全部 enabled = false）
+    assert (ws / "providers" / "README.md").exists()
+    for provider_id in ("openai", "anthropic", "google", "ollama", "xai", "mistral",
+                        "qwen", "deepseek", "doubao", "kimi", "zhipu", "minimax",
+                        "tencent", "xiaomi", "stepfun", "openai-compatible", "meta",
+                        "bedrock", "groq", "fireworks", "together", "cohere",
+                        "perplexity", "databricks", "cerebras", "openrouter"):
+        assert (ws / "providers" / f"{provider_id}.toml").exists()
     # 子文件
     assert (ws / "mcp" / "mcp.json").exists()
     assert (ws / "skills" / "example" / "SKILL.md").exists()
@@ -558,21 +685,29 @@ def test_scenario_1_new_workspace_full_tree(tmp_path):
     assert (ws / "manifest.json").exists()
 ```
 
-### 6.2 provider.toml 用 tomllib 解析无异常
+### 6.2 providers/ 目录用 tomllib 解析无异常
 
 ```python
-def test_scenario_2_provider_toml_valid(tmp_path):
-    """生成的 provider.toml 可被 tomllib 解析，且顶层含 default_provider / default_model"""
+def test_scenario_2_providers_dir_valid(tmp_path):
+    """生成的 providers/ 目录：default.toml 含两个全局字段；每个 stub 可被 tomllib 解析且 enabled = false"""
     import tomllib
     ws = tmp_path / "ws"
     subprocess.run(["donkey", "init", str(ws)], check=True, capture_output=True)
-    data = tomllib.loads((ws / "provider.toml").read_text(encoding="utf-8"))
-    # 顶层两个全局字段（立项书 §4.6.2 / 调研 §7.2）
-    assert "default_provider" in data
-    assert "default_model" in data
-    # per-provider 独立节
-    assert data["default_provider"] in data
-    assert "api_key" in data[data["default_provider"]]
+
+    # 全局默认文件（保留名）
+    default = tomllib.loads((ws / "providers" / "default.toml").read_text(encoding="utf-8"))
+    # 两个全局字段（立项书 §4.6.2 / 调研 §7.2）
+    assert "default_provider" in default
+    assert "default_model" in default
+
+    # 每个 provider stub：可解析 + 出厂态 enabled = false + 惰性（不要求 api_key）
+    for provider_id in ("openai", "anthropic", "minimax", "ollama", "bedrock"):
+        data = tomllib.loads(
+            (ws / "providers" / f"{provider_id}.toml").read_text(encoding="utf-8")
+        )
+        assert data["enabled"] is False
+        # 出厂态允许 api_key 为空（disabled → 完全惰性，调研 §7.3）
+        assert data.get("api_key", "") == ""
 ```
 
 ### 6.3 mcp/mcp.json 用 json.loads 解析无异常
@@ -605,12 +740,12 @@ def test_scenario_4_skill_frontmatter_valid(tmp_path):
 
 ```python
 def test_scenario_5_name_injection(tmp_path):
-    """--name=foo 注入后，README 标题与 provider.toml 注释含 'foo'"""
+    """--name=foo 注入后，README 标题与 providers/default.toml 注释含 'foo'"""
     ws = tmp_path / "ws"
     subprocess.run(["donkey", "init", str(ws), "--name", "foo"], check=True, capture_output=True)
     readme = (ws / "README.md").read_text(encoding="utf-8")
     assert "foo" in readme
-    provider = (ws / "provider.toml").read_text(encoding="utf-8")
+    provider = (ws / "providers" / "default.toml").read_text(encoding="utf-8")
     assert "foo" in provider  # 注释中含 workspace name（{{ workspace_name }} 占位符已被替换）
     manifest = json.loads((ws / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["name"] == "foo"
@@ -695,30 +830,10 @@ def test_scenario_10_rm_then_init(tmp_path):
     assert (ws / "instruction.md").exists()
 ```
 
-### 6.11 源 .txt 缺失 → exit 3
+### 6.11 不生成内置 @tool 文件
 
 ```python
-def test_scenario_11_template_source_missing(tmp_path, monkeypatch):
-    """删除 templates/instruction.md.txt 后 --force → exit 3"""
-    ws = tmp_path / "ws"
-    subprocess.run(["donkey", "init", str(ws)], check=True, capture_output=True)
-    # 用 monkeypatch 把模板源文件路径指向不存在的路径
-    # 或直接在 donkey 安装目录删 templates/instruction.md.txt（更脆弱，但更真实）
-    src = Path("donkey/core/workspace/templates/instruction.md.txt")
-    src_backup = src.read_bytes()
-    try:
-        src.unlink()
-        result = subprocess.run(["donkey", "init", str(ws), "--force"], capture_output=True, text=True)
-        assert result.returncode == 3
-        assert "TemplateGenerationError" in result.stderr or "模板" in result.stderr
-    finally:
-        src.write_bytes(src_backup)
-```
-
-### 6.12 不生成内置 @tool 文件
-
-```python
-def test_scenario_12_no_builtin_tools_yet(tmp_path):
+def test_scenario_11_no_builtin_tools_yet(tmp_path):
     """P2 不生成 tools/filesystem.py 等内置 @tool（属于 P3）"""
     ws = tmp_path / "ws"
     subprocess.run(["donkey", "init", str(ws)], check=True, capture_output=True)
@@ -730,22 +845,22 @@ def test_scenario_12_no_builtin_tools_yet(tmp_path):
     assert not (ws / "tools" / "__init__.py").exists()
 ```
 
-### 6.13 不做 F002 静态检查
+### 6.12 不做 F002 静态检查
 
 ```python
-def test_scenario_13_no_f002_static_check(tmp_path):
+def test_scenario_12_no_f002_static_check(tmp_path):
     """P2 init 完成后不跑 F002 静态检查（属 F002 域）"""
     ws = tmp_path / "ws"
-    # 即使故意写错 provider.toml 也不应在 init 阶段报错（init 只生成模板，不校验内容）
+    # 即使故意写错 providers/ 下的 TOML 也不应在 init 阶段报错（init 只生成模板，不校验内容）
     result = subprocess.run(["donkey", "init", str(ws)], capture_output=True, text=True)
-    assert result.returncode == 0  # init 不校验 provider.toml 内容
+    assert result.returncode == 0  # init 不校验 providers/ 内容
     # F002 才会校验
 ```
 
-### 6.14 memory/ 模板边界：`--force` 等于"恢复出厂设置"——sqlite3 三模板被重建
+### 6.13 memory/ 模板边界：`--force` 等于"恢复出厂设置"——sqlite3 三模板被重建
 
 ```python
-def test_scenario_14_force_rebuilds_sqlite3_templates(tmp_path):
+def test_scenario_13_force_rebuilds_sqlite3_templates(tmp_path):
     """用户首次 init → 含 sqlite3 三模板；用户备份后 --force → 三模板被重建（schema 重建，数据清空）"""
     import shutil
     import sqlite3
@@ -799,10 +914,10 @@ def test_scenario_14_force_rebuilds_sqlite3_templates(tmp_path):
     assert "--force" in readme  # 模板正文中提到 --force 备份要点
 ```
 
-### 6.15 init 后三个 sqlite3 模板存在 + sessions.sqlite3 带正确 schema
+### 6.14 init 后三个 sqlite3 模板存在 + sessions.sqlite3 带正确 schema
 
 ```python
-def test_scenario_15_sqlite3_templates_with_schema(tmp_path):
+def test_scenario_14_sqlite3_templates_with_schema(tmp_path):
     """init 后 memory/ 三个 sqlite3 文件全部存在；sessions.sqlite3 schema 检查（含 SqliteSaver 表 + sessions_metadata + 索引）"""
     import sqlite3
     ws = tmp_path / "ws"
@@ -841,9 +956,9 @@ def test_scenario_15_sqlite3_templates_with_schema(tmp_path):
         conn.close()
 ```
 
-### 6.16 退出条件总览
+### 6.15 退出条件总览
 
-verify_phase_f001_p2.py 的 15 个 `test_*` 函数全部 PASS → F001-P2 完成。F001-P2 完成时，`--force` 等于"恢复出厂设置"语义 + 三个 sqlite3 模板（含 sessions.sqlite3 完整 schema + store/knowledge 占位空文件）已落地；为下一 Phase（F001-P3 = `builtin_tools`）的入口条件做好铺垫。
+verify_phase_f001_p2.py 的 14 个 `test_*` 函数全部 PASS → F001-P2 完成。F001-P2 完成时，`--force` 等于"恢复出厂设置"语义 + 三个 sqlite3 模板（含 sessions.sqlite3 完整 schema + store/knowledge 占位空文件）已落地；为下一 Phase（F001-P3 = `builtin_tools`）的入口条件做好铺垫。
 
 ---
 
@@ -898,7 +1013,7 @@ verify_phase_f001_p2.py 的 15 个 `test_*` 函数全部 PASS → F001-P2 完成
 | `donkey load` / `donkey session` / `donkey run` 等其它子命令 | F002 / F003 / F004 |
 | 任何 LangChain 中间件挂载（`FilesystemFileSearchMiddleware` 等） | F004 (`donkey run`) |
 | 任何 `init_chat_model` / 模型连通性测试 | F002 (`donkey load`) |
-| 解析 / 校验 `provider.toml` 内容 | F002 (`donkey load`) |
+| 解析 / 校验 `providers/` 目录内容 | F002 (`donkey load`) |
 | 解析 / 校验 `mcp/mcp.json` 内容 | F002 (`donkey load`) |
 | 解析 / 校验 `skills/*/SKILL.md` 内容（除本 Phase 验证 frontmatter 存在性外） | F002 (`donkey load`) |
 | "init 后跑 F002 静态检查" | F002 域 |
@@ -948,10 +1063,10 @@ verify_phase_f001_p2.py 的 15 个 `test_*` 函数全部 PASS → F001-P2 完成
 
 执行 `/speckit.specify` 后生成的 `specs/001-donkey-init-workspace/phase-2-template-skeleton/spec.md` **必须**包含：
 
-1. **User Stories**：按优先级 P1 → P15 列出 15 个核心场景（对应 §6 的 15 个 verify 断言）；
+1. **User Stories**：按优先级 P1 → P14 列出 14 个核心场景（对应 §6 的 14 个 verify 断言）；
 2. **Functional Requirements (FR-001 ~ FR-NNN)**：覆盖 §4 的 10 个子节（4.1 ~ 4.10）；FR 中如需引用 F001-P1 已实现的函数（`check_path` / `check_permission` / `load_template_manifest` / `validate_init_request`），仅引用**函数签名与行为契约**，不复述其实现细节（详见 §3.2 函数契约小节）；
 3. **Edge Cases**：本 Phase 边界条件（用户编辑过模板 / 用户删除模板 / 用户删除源 .txt / 用户手动 rm -rf / sqlite3 文件被 touch 等）；
-4. **Success Criteria (SC-001 ~ SC-NNN)**：可量化的退出条件（"15 个 verify 断言全部 PASS"、"F001-P1 7 个断言仍全绿"、"ruff + mypy 零 error"等）；
+4. **Success Criteria (SC-001 ~ SC-NNN)**：可量化的退出条件（"14 个 verify 断言全部 PASS"、"F001-P1 6 个断言仍全绿"、"ruff + mypy 零 error"等）；
 5. **Key Entities**：`TemplateGenerationError` 异常类、`workspace manifest` 字典结构、模板清单 `manifest.json` schema；
 6. **Assumptions**：F001-P1 (`cli_validation`) 已完成；`donkey/core/workspace/templates/*.txt` 已就位（占位 / 实际内容均可）；F002 / F003 / F004 域不存在。
 

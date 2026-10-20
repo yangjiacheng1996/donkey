@@ -17,11 +17,11 @@
 | ★★ | `harness/report/内置工具应该自己实现还是调用中间件.md` | 三大内置 `@tool` 设计决策依据 |
 | ★★ | `harness/report/Saver和Store.md` | 长期记忆选型 + SqliteStore 实施蓝本（v3 路线） |
 | ★★ | `harness/report/LangGraph的节点到底是什么东西.md` | 中间件 hook 风格 → 节点数映射 |
-| ★★ | `harness/report/大模型toml参数设计.md` | `provider.toml` schema 权威（provider 白名单 / 字段 / 三档鉴权 / exit 11 校验清单） |
+| ★★ | `harness/report/大模型toml参数设计.md` | `providers/` 目录 schema 权威（provider 白名单 / 字段 / `enabled` 开关 / 三档鉴权 / exit 11 校验清单） |
 | ★★ | `harness/report/sessions_sqlite表结构一览.md` | `memory/*.sqlite3` schema 权威（`sessions_metadata` 表设计 + F002-P2 健康检查口径） |
 | ★ | `harness/LangChain_doc/`、`harness/LangGraph_doc/`、`harness/Managed_deep_agents/` | 官方文档镜像 |
 | ★ | `harness/prompt/speckit.md` | Speckit 工作流提示词 |
-| ★★★ | `harness/features/README.md`（本文档）| **各 Feature 段位内 exit code 落地映射**（F001 见 §3.1+§4、F003 见 §3.3+§6.2、F004 / F005 / F006 见 §3.4 / §3.5 / §3.6）。段位边界与冗余性原则仍以立项书 §5.5.3 + 宪法 §4.4 为权威 |
+| ★★★ | `harness/features/README.md`（本文档）| **各 Feature 段位内 exit code 落地映射**（F001 见 §3.1+§4.1、F002 见 §3.2+§5、F003 见 §3.3+§6、F004 见 §3.4+§7、F005 见 §3.5+§8、F006 见 §3.6+§9）。段位边界与冗余性原则仍以立项书 §5.5.3 + 宪法 §4.4 为权威 |
 
 ---
 
@@ -46,7 +46,7 @@ featurexxx_phasexxx_<phase name>.md
 
 - `xxx` 三位数字，左侧补 0；第一个 `xxx` = F 编号，第二个 `xxx` = Phase 编号（**与 §3 一览总表 / §X.Y 章节号 / verify 脚本名严格一致**）；
 - `<phase name>` 用英文短横线连字符（kebab-case），与 §X.Y 章节标题保持一致（`cli_validation` / `template_skeleton` / `builtin_tools` / `static_format` / `dynamic_runtime` / `list` / `new` / `tools` / `middleware` / `agent_loop` 等）；
-- **1 Phase = 1 提示词文件 = 1 次 `/speckit.specify` 闭环**（spec → clarify → plan → tasks → analyse → implement → human verify → converge）；v1 baseline 27 Phase = 27 文件（详见 §12）；
+- **1 Phase = 1 提示词文件 = 1 次 `/speckit.specify` 闭环**（9 步流程见 §12.4）；v1 baseline 27 Phase = 27 文件（详见 §12）；
 - 例：`feature001_phase001_cli_validation.md`（F001-P1）、`feature003_phase002_new.md`（F003-P2）、`feature004_phase006_middleware.md`（F004-P6）；
 - **Phase 编号严格串行**：同 Feature 内 Phase 编号严格递增；Phase 编号不跨 Feature 复用；
 - **本规则与 §1.5 术语表配套**：Phase = dev unit，**不**用作 exit code 子段或 Error class 分组的抽象概念（那两者用"子段"和"Error class"分别表达）。
@@ -64,7 +64,7 @@ featurexxx_phasexxx_<phase name>.md
 
 每设计一个 Phase 必须带齐三要素，对应 `featurexxx_phasexxx_*.md` 提示词文件中的固定章节：
 
-1. **入口条件（Entry Gate）**：前置 Phase 的退出条件全部满足（可能跨 Feature——按 §10.2 跨 Feature 滚动策略）；
+1. **入口条件（Entry Gate）**：前置 Phase 的退出条件全部满足（可能跨 Feature——按 §10.2 跨 Feature 推进策略 / 门控关系）；
 2. **异常退出码（Exit Code）**：该 Phase 覆盖的子段内 Error class 对应的 exit code 集合（落在该 Feature 段位内；具体码值见 §3.1-§3.6 一览总表对应行）；
 3. **退出条件（Exit Gate）**：可执行、可验证的硬指标——由 `verify_phase_<f>_<n>.py` 验证脚本跑出 PASS/FAIL。
 
@@ -72,10 +72,10 @@ featurexxx_phasexxx_<phase name>.md
 
 | 术语 | 定义 | 标识 | 用途 | v1 baseline 数 |
 |---|---|---|---|---|
-| **Phase** | **开发阶段**——1 次 `/speckit.specify` 闭环单位（spec → clarify → plan → tasks → analyse → implement → human verify → converge） | `F###-P#` | 提示词文件命名、§X.Y 章节、跨 Phase 滚动规划 | 27 |
+| **Phase** | **开发阶段**——1 次 `/speckit.specify` 闭环单位（见 §12.4（1 次 /speckit.specify 闭环的 9 步流程）） | `F###-P#` | 提示词文件命名、§X.Y 章节、跨 Phase 滚动规划 | 27 |
 | **段位** | exit code 段位——一个 Feature 拥有的 exit code 连续范围（详见立项书 §5.5.3 段位分配总表） | `1-10` / `11-20` / `21-30` / `31-100` / `101-170` / `171-200` | 段位预留冗余性、跨 Feature 不重叠 | 6（F001 / F002 / F003 / F004 / F005 / F006） |
 | **子段** | 段位内的 exit code 子分组——Phase 在段位内"占用"的 exit code 范围（含已用 + 预留） | `F001 子段 1` = exit 1-2；`F001 子段 2` = exit 3；`F001 子段 3` = exit 4 | §3.1-§3.6 一览总表每行；段位切 Phase 的产物 | 27（v1 baseline 1:1 与 Phase 数对齐） |
-| **Error class** | 具体 Python 异常类（`PathNotFoundError` / `PathPermissionError` / ...） | 类名 | 代码中的 `raise` / `except` 捕获 | **92**（v1 实装码位 83 个 → 其中 exit 11 是 1 个伞形类覆盖 8 个类，故 v1 实装类 = 83 − 1 + 8 = **90**；再加 F003-P4 import 的 2 个 v1.x 留接口类 `SessionImportFormatError` / `SessionImportSqliteError` → 定义态共 **92**；详见 §3.1~§3.6 + §11 总分配） |
+| **Error class** | 具体 Python 异常类（`PathNotFoundError` / `PathPermissionError` / ...） | 类名 | 代码中的 `raise` / `except` 捕获 | **89**（v1 实装码位 80 个 → 其中 exit 11 是 1 个伞形类 + 7 个子类 = 8 个类，故 v1 实装类 = 80 − 1 + 8 = **87**；再加 F003-P4 import 的 2 个 v1.x 留接口类 `SessionImportFormatError` / `SessionImportSqliteError` → 定义态共 **89**；详见 §3.1~§3.6 + §11 总分配。**注**：F004-P5 的 3 个 Store 码（71-73）是 **v3 占位**，不计入 v1 实装） |
 
 **关键区分**：
 
@@ -157,7 +157,7 @@ class BuiltinToolGenerationError(WorkspaceInitError):
 |---|---|---|---|---|---|
 | F001 | 子段 1（= Phase P1）| `PathNotFoundError` | 1 | PATH 父目录不存在 / 路径解析失败（如相对路径、非法字符） | 高 |
 | F001 | 子段 1（= Phase P1）| `PathPermissionError` | 2 | PATH 权限不足（父目录和 workspace 缺失读 / 写 / 执行权限） | 高 |
-| F001 | 子段 2（= Phase P2）| `TemplateGenerationError` | 3 | 模板骨架生成失败（合并项：源缺失 / 渲染失败 / 文件写入失败；用户修复动作相同） | 低 |
+| F001 | 子段 2（= Phase P2）| `TemplateGenerationError` | 3 | 模板骨架生成失败（合并四项：源缺失 / 渲染失败 / 文件写入失败 / sqlite3 schema 构造失败；用户修复动作相同） | 低 |
 | F001 | 子段 3（= Phase P3）| `BuiltinToolGenerationError` | 4 | 内置 `@tool` + Skills example 生成失败（合并三项：filesystem/commandline/webfetch 写入失败、SKILL.md 三层写入失败、端到端集成预演失败） | 低 |
 | F001 | 子段预留 | （预留） | 5-10 | 留给 v1.x 试运行期发现的新错误 | — |
 
@@ -175,20 +175,20 @@ class BuiltinToolGenerationError(WorkspaceInitError):
 
 | Feature | 子段 / Phase | 异常类名 | 退出码 | 异常原因描述 | 报错概率 |
 |---|---|---|---|---|---|
-| F002 | 子段 1（= Phase P1，**伞形码**）| **`ProviderTomlLoadError`**（伞形） | **11** | **`provider.toml` 加载阶段任何失败**——覆盖 7 类子错误（详见下表 §3.2.1 子类清单）：TOML 解析、字段名拼写、字段类型、字段值硬越界、URL 合法性、scope 检查（白名单 / 永久黑名单 / 暂不支持清单 / v2+ 候选）、default_model 不在 models 表 | 高 |
-| F002 | P1 | `McpJsonSyntaxError` | 12 | `mcp/mcp.json` JSON 语法错误 | 高 |
-| F002 | P1 | `SkillFrontmatterError` | 13 | `skills/*/SKILL.md` YAML frontmatter 错误（缺 `name` / `description`） | 高 |
-| F002 | P2 | `InstructionMissingError` | 14 | `instruction.md` 缺失 / 目录结构不完整 | 高 |
-| F002 | P2 | `ProviderConnectivityError` | 15 | 模型连通性失败（`init_chat_model` + ping 超时 / 鉴权失败；`provider.toml` 中仍为出厂占位符 `REPLACE_ME` 时同样触发） | 中 |
-| F002 | P2 | `SqliteSchemaError` | 16 | `memory/sessions.sqlite3` 不可读 / schema 不健康（**5 项断言**：`PRAGMA table_info(checkpoints)` + `PRAGMA table_info(writes)` + `PRAGMA table_info(sessions_metadata)` 6 字段 + `idx_sessions_metadata_title` / `idx_sessions_metadata_updated_at` 索引名 + `PRAGMA integrity_check`；详见 `sessions_sqlite表结构一览.md` §7） | 低 |
-| F002 | P3 | `ToolLoadError` | 17 | `tools/*.py` `@tool` 自动发现失败（import 错误 / 函数签名不合规） | 中 |
+| F002 | 子段 1（= Phase P1，**伞形码**）| **`ProviderTomlLoadError`**（伞形） | **11** | **`providers/` 目录加载阶段任何失败**——覆盖 7 个子类（详见下表 §3.2.1）：`ProviderTomlSyntaxError`（TOML 解析）/ `ProviderTomlFieldError`（字段名拼写、必填缺失、零 enabled provider、默认项跨文件不一致）/ `ProviderTomlFieldTypeError`（字段类型）/ `ProviderTomlFieldValueError`（字段值硬越界、URL 合法性）/ `ProviderTomlScopeError`（scope 检查：白名单 / 永久黑名单 / 暂不支持清单 / v2+ 候选）/ `ProviderTomlMissingModelError`（default_model 不在 default provider 的 `[models]` 表）/ `ProviderTomlHostNotAllowedError`（api_host 不被该 provider 类允许） | 高 |
+| F002 | 子段 1（= Phase P1）| `McpJsonSyntaxError` | 12 | `mcp/mcp.json` JSON 语法错误 | 高 |
+| F002 | 子段 1（= Phase P1）| `SkillFrontmatterError` | 13 | `skills/*/SKILL.md` YAML frontmatter 错误（缺 `name` / `description`） | 高 |
+| F002 | 子段 2（= Phase P2）| `InstructionMissingError` | 14 | `instruction.md` 缺失 / 目录结构不完整 | 高 |
+| F002 | 子段 2（= Phase P2）| `ProviderConnectivityError` | 15 | 模型连通性失败（`init_chat_model` + ping 超时 / 鉴权失败 401/403）——**凭据无效不走本码**：云端 provider 的空 `api_key` 在**构造期**即被拒（`Missing credentials`）→ exit 11 伞形（见 §3.2.1 + 调研 §9.1.1 / §9.2）；本码只留给"凭据有效但连通性失败" | 中 |
+| F002 | 子段 2（= Phase P2）| `SqliteSchemaError` | 16 | `memory/sessions.sqlite3` 不可读 / schema 不健康（**5 项断言**：`PRAGMA table_info(checkpoints)` + `PRAGMA table_info(writes)` + `PRAGMA table_info(sessions_metadata)` 6 字段 + `idx_sessions_metadata_title` / `idx_sessions_metadata_updated_at` 索引名 + `PRAGMA integrity_check`；详见 `sessions_sqlite表结构一览.md` §7） | 低 |
+| F002 | 子段 3（= Phase P3）| `ToolLoadError` | 17 | `tools/*.py` `@tool` 自动发现失败（import 错误 / 函数签名不合规） | 中 |
 | F002 | 子段 3（= Phase P3）| `SkillLoadError` | 18 | `skills/*/SKILL.md` 通过自研 loader 加载失败（Level 2 读取异常） | 中 |
 | F002 | 子段 3（= Phase P3）| `McpServerError` | 19 | `MCPAdapter` 拉起 server 失败（stdio / http 连接失败） | 中 |
 | F002 | 子段预留 | （预留） | 20 | 留给 v1.x 试运行期发现的新错误 | — |
 
 #### §3.2.1 `ProviderTomlLoadError`（exit 11）子类清单
 
-> **设计原则**：exit 11 归 `ProviderTomlLoadError` **伞形 Error class**，承载下表 7 类子错误——所有这些错误的用户修复动作相同（“打开 `provider.toml` 检查 / 修正字段后重试 `donkey load`”），按奥卡姆剃刀合并为单一 exit code；子错误在 traceback 中仍可区分。
+> **设计原则**：exit 11 归 `ProviderTomlLoadError` **伞形 Error class**，承载下表 **7 个子类**（伞形本身 + 7 子类 = 8 个 Error class）——所有这些错误的用户修复动作相同（“打开 `providers/` 目录检查 / 修正字段后重试 `donkey load`”），按奥卡姆剃刀合并为单一 exit code；子错误在 traceback 中仍可区分。**多文件布局下，错误消息必须携带文件路径**（`providers/<id>.toml: ...`）。
 
 | 子类 Error class（继承 `ProviderTomlLoadError`） | 触发条件 | 报错概率 | 备注 |
 |---|---|---|---|
@@ -253,9 +253,9 @@ class BuiltinToolGenerationError(WorkspaceInitError):
 | F004 | P4 = saver | `SaverWriteError` | 62 | checkpoint 写入失败（磁盘满 / 锁等待超时） | 中 |
 | F004 | P4 = saver | `SaverReadError` | 63 | checkpoint 读取失败（schema 不兼容） | 低 |
 | F004 | P4 = saver | （预留） | 64-70 | 留给未来 saver 相关错误（7 个） | — |
-| F004 | P5 = store | `StoreOpenError` | 71 | store 初始化失败（v3 SqliteStore 文件路径无效 / 权限不足；v1 InMemoryStore 几乎不触发） | 低 |
-| F004 | P5 = store | `StoreWriteError` | 72 | store 写入失败（`aput` 抛错；Schema 不兼容 / 容量不足） | 低 |
-| F004 | P5 = store | `StoreReadError` | 73 | store 读取失败（`aget` / `asearch` 抛错；JSON 反序列化失败） | 低 |
+| F004 | P5 = store | `StoreOpenError` | 71 | store 初始化失败（v3 SqliteStore 文件路径无效 / 权限不足）——**v3 占位码，v1 不实装**（v1/v2 用 `InMemoryStore`，不落盘、不抛此错；见立项书 §5.5.5） | 低（v3） |
+| F004 | P5 = store | `StoreWriteError` | 72 | store 写入失败（`aput` 抛错；Schema 不兼容 / 容量不足）——**v3 占位码，v1 不实装** | 低（v3） |
+| F004 | P5 = store | `StoreReadError` | 73 | store 读取失败（`aget` / `asearch` 抛错；JSON 反序列化失败）——**v3 占位码，v1 不实装** | 低（v3） |
 | F004 | P5 = store | （预留） | 74-80 | 留给 v1.x 试运行期发现的新错误（Store 相关） | — |
 | F004 | P6 = middleware | `ToolErrorMiddlewareError` | 81 | ToolError 中间件异常（不可恢复，绕过 wrap-style） | 低 |
 | F004 | P6 = middleware | `ToolRetryMiddlewareError` | 82 | ToolRetry 重试超限（exponential backoff 用尽） | 中 |
@@ -280,9 +280,9 @@ class BuiltinToolGenerationError(WorkspaceInitError):
 | LangChain 异常类 (langchain_core.exceptions) | 是否 retryable | 默认 retry policy | donkey v1 映射 exit code | Error class |
 |---|---|---|---|---|
 | `ModelAuthenticationError` | ❌（**401/403** 永久拒绝） | 不重试 | **90**（F004-P6 已分配） | `ModelAuthenticationError` |
-| `ModelPermissionDeniedError` | ❌（权限不足，非短期可恢复） | 不重试 | **90**（同 ModelAuthenticationError 处理，伞形合并按奥卡姆） | `ModelPermissionDeniedError` |
+| `ModelPermissionDeniedError` | ❌（权限不足，非短期可恢复） | 不重试 | **90**（同 ModelAuthenticationError 处理，伞形合并按奥卡姆） | `ModelAuthenticationError` |
 | `ModelInvalidRequestError` | ❌（400 bad request，用户的 prompt 或参数错） | 不重试 | **83**（F004-P6 middleware 拦截后抛 `ModelRetryMiddlewareError` 反映"请求始终失败"，v1 baseline 用 83） | `ModelRetryMiddlewareError` |
-| `ModelNotFoundError` | ❌（404 模型不存在） | 不重试 | **90**（同 ModelAuthenticationError 伞形） | `ModelAuthenticationOrNotFoundError` |
+| `ModelNotFoundError` | ❌（404 模型不存在） | 不重试 | **90**（同 ModelAuthenticationError 伞形） | `ModelAuthenticationError` |
 | `ModelRateLimitError` | ✅（429 短期） | exponential backoff 重试，直到耗尽 | **83**（F004-P6 `ModelRetryMiddlewareError`，重试超限） | `ModelRetryMiddlewareError` |
 | `ModelAPIError` | ✅（5xx provider 服务故障） | exponential backoff 重试，直到耗尽 | **83**（同上） | `ModelRetryMiddlewareError` |
 | `ModelConnectionError` | ✅（网络故障） | exponential backoff 重试，直到耗尽 | **83**（同上） | `ModelRetryMiddlewareError` |
@@ -290,7 +290,7 @@ class BuiltinToolGenerationError(WorkspaceInitError):
 | `ContextOverflowError` | ❌（输入超上下文窗口） | 不重试 | **85**（F004-P6 `ModelCallLimitMiddlewareError`——"调用次数超限/输入超限"伞形合并） | `ModelCallLimitMiddlewareError` |
 | **（构造期）`openai.OpenAIError: Missing credentials`** | ❌ | 不重试 | **90** | `ModelAuthenticationError` |
 
-> **实测补充**：最后一行是实测新增——`api_key` 缺失 / 为空串时，底层 SDK 在**构造 ChatModel / client 阶段**就抛 `Missing credentials`（**不是**运行时的 401），因此 §3.2.1 的"空 `api_key` → warning"路径终点是**构造期失败**。该异常原始文案含"or set the `OPENAI_API_KEY` ... environment variable"——与"donkey 绝不读 env var"立场冲突，**CLI 层必须改写文案**（如"api_key 未配置或为空，请检查 provider.toml"），不得把用户引向 env var 路径。详见 `harness/report/大模型toml参数设计.md §9.1.1 / §9.2`。
+> **实测补充**：最后一行是实测新增——`api_key` 缺失 / 为空串时，底层 SDK 在**构造 ChatModel / client 阶段**就抛 `Missing credentials`（**不是**运行时的 401），因此 §3.2.1 的"空 `api_key` → warning"路径终点是**构造期失败**。该异常原始文案含"or set the `OPENAI_API_KEY` ... environment variable"——与"donkey 绝不读 env var"立场冲突，**CLI 层必须改写文案**（如"api_key 未配置或为空，请检查 providers/<provider_id>.toml"），不得把用户引向 env var 路径。详见 `harness/report/大模型toml参数设计.md §9.1.1 / §9.2`。
 
 > **奥卡姆合并逻辑**（依据 §1.5 哲学 + 大概率原则）：
 > - **retryable 错误**（429 / 5xx / 网络 / 超时 / **400 请求格式错**）→ 全部退避后都汇总到 exit 83 (`ModelRetryMiddlewareError`)。用户的修复动作相同——"等会儿重试 / 改写 prompt / 切换 provider"；
@@ -389,7 +389,11 @@ class BuiltinToolGenerationError(WorkspaceInitError):
 ```
 templates/
 ├── instruction.md              ← 模板（文本）
-├── provider.toml               ← 模板（文本）
+├── providers/                  ← 模板目录（**一 provider 一文件**）
+│   ├── default.toml            ← 模板（文本）—— 全局默认（default_provider / default_model）
+│   ├── README.md               ← 模板（文本）—— 26 家白名单目录快照
+│   ├── openai.toml             ← 模板（文本）—— provider stub（enabled = false）
+│   └── ...                     ← 共 26 个 provider stub（v1 白名单）
 ├── mcp/mcp.json                ← 模板（JSON 文本）
 ├── skills/example/             ← 模板（含子文件 SKILL.md + reference/ + scripts/ + templates/）
 ├── tools/filesystem.py         ← 模板（内置 7 个 @tool）
@@ -407,13 +411,13 @@ templates/
 └── .gitignore                  ← 模板（已含 `memory/*.sqlite3`）
 ```
 
-> **manifest 分阶段追加（v1 baseline = 25 条）**：模板清单**不一次性预列全部路径**，而是随各 Phase 逐段追加——**保证"清单里的每一条都已有对应的模板源 .txt"**（否则 P2 的 `render_templates` 会因源缺失抛 exit 3）：
+> **manifest 分阶段追加（v1 baseline = 53 条）**：模板清单**不一次性预列全部路径**，而是随各 Phase 逐段追加——**保证"清单里的每一条都已有对应的模板源 .txt"**（否则 P2 的 `render_templates` 会因源缺失抛 exit 3）：
 >
 > | 阶段 | 追加条数 | 累计 | 内容 |
 > |---|---|---|---|
-> | **F001-P1** | 3 | 3 | `instruction.md` / `provider.toml` / `mcp/mcp.json`（与 P1 已就位的 3 个 .txt 占位一一对应；P1 只加载清单、不渲染） |
-> | **F001-P2** | +15 | 18 | 其余 10 个文本模板 + 5 个目录条目（`tools/` `mcp/` `skills/` `skills/example/` `memory/`）+ 3 个 sqlite3 模板 |
-> | **F001-P3** | +7 | 25 | `tools/__init__.py` + 3 个内置 tool + 3 个 Skills Level 3 示例 |
+> | **F001-P1** | 3 | 3 | `instruction.md` / `providers/default.toml` / `mcp/mcp.json`（与 P1 已就位的 3 个 .txt 占位一一对应；P1 只加载清单、不渲染） |
+> | **F001-P2** | +43 | 46 | 其余 7 个文本模板 + 6 个目录条目（`tools/` `mcp/` `skills/` `skills/example/` `memory/` **`providers/`**）+ 3 个 sqlite3 模板 + **`providers/README.md` + 26 个 provider stub（`providers/<id>.toml`）** |
+> | **F001-P3** | +7 | 53 | `tools/__init__.py` + 3 个内置 tool + 3 个 Skills Level 3 示例 |
 >
 > **包内 `templates/manifest.json` ≠ workspace 根的 `manifest.json`**：前者是**模板文件清单**（装在 donkey 包内，驱动 `render_templates` 幂等渲染）；后者是 **D-01 的 workspace manifest**（落在 `<workspace>/manifest.json`，含 `version` / `name` / `created_at` / `donkey_version` 4 字段，由 `core/workspace/manifest.py` 单独写入，**不**进模板清单）。
 
@@ -445,7 +449,7 @@ templates/
 **`--force` 行为细节**：
 - 遍历模板清单，对每个模板路径执行 `delete`（文件或目录递归删除）+ `create`（默认内容）；
 - 不在清单内的任何文件 / 目录**完全不动**；
-- **清单内的模板文件一律被覆盖回出厂内容**——包括用户可能编辑过的 `instruction.md` / `provider.toml` / `skills/example/SKILL.md`（"恢复出厂设置"语义，见 F001-P2 §6.8 断言）；用户想保留自己的内容，应**先备份**再 `--force`；
+- **清单内的模板文件一律被覆盖回出厂内容**——包括用户可能编辑过的 `instruction.md` / **`providers/*.toml`（含用户填的 `api_key`！）** / `skills/example/SKILL.md`（"恢复出厂设置"语义，见 F001-P2 §6.8 断言）；用户想保留自己的内容，应**先备份**再 `--force`；
 - **两个 manifest 的处置不同**：`<workspace>/manifest.json`（D-01 workspace manifest）在 `--force` 时被**覆盖并刷新 `created_at`**（F001-P2 §4.2）；**包内**的 `core/workspace/templates/manifest.json`（模板文件清单）**不**由 `--force` 触碰——它随 donkey 发行版发布，由"donkey 升级"更新（用于引入新模板）。
 
 **幂等性 + 损坏恢复的工作流**（用户视角）：
@@ -457,9 +461,9 @@ templates/
 
 | Phase | 提示词文件 | 子段（exit code 范围） | 主要工作 | Error 类 |
 |---|---|---|---|---|
-| **F001-P1** | `feature001_phase001_cli_validation.md` | `1-2` | CLI 入口 + 路径 / 权限校验 + 模板清单加载 | `PathNotFoundError` / `PathPermissionError` |
-| **F001-P2** | `feature001_phase002_template_skeleton.md` | `3` | 幂等生成模板骨架（补齐缺失 / `--force` 重置）+ 模板清单驱动（追加 15 条 → 累计 18 条） | `TemplateGenerationError` |
-| **F001-P3** | `feature001_phase003_builtin_tools.md` | `4` | 幂等生成 3 个内置 `@tool` + Skills example 三层（追加 7 条 → 累计 25 条） | `BuiltinToolGenerationError` |
+| **F001-P1** | `feature001_phase001_cli_validation.md` | `1-2` | CLI 入口 + 路径 / 权限校验 + 创建 workspace 根目录（**不加载模板清单**——推迟到 P2） | `PathNotFoundError` / `PathPermissionError` |
+| **F001-P2** | `feature001_phase002_template_skeleton.md` | `3` | 幂等生成模板骨架（补齐缺失 / `--force` 重置）+ 模板清单驱动（追加 43 条 → 累计 46 条） | `TemplateGenerationError` |
+| **F001-P3** | `feature001_phase003_builtin_tools.md` | `4` | 幂等生成 3 个内置 `@tool` + Skills example 三层（追加 7 条 → 累计 53 条） | `BuiltinToolGenerationError` |
 
 ### §4.3 F001-P1 = `cli_validation`（exit 1-2）
 
@@ -467,11 +471,11 @@ templates/
 - `donkey/core/` / `donkey/cli/` / `donkey/web/` / `donkey/gui/` 目录已创建；
 - `donkey/core/exit_codes.py` 已实现 exit code 段位常量；
 - `donkey/core/exceptions.py` 已定义基类 `DonkeyError` 与 F001 基类 `WorkspaceInitError`，并定义 2 个具体异常类（`PathNotFoundError` / `PathPermissionError`，对应 exit 1 / 2）；
-- `core/workspace/templates/manifest.json`（模板清单）已定义——**P1 阶段仅 3 条 entry**（`instruction.md` / `provider.toml` / `mcp/mcp.json`）；清单**分阶段追加**（P1 3 → P2 +15 = 18 → P3 +7 = 25），保证每条 entry 都有对应源文件；
-- `core/workspace/templates/{entry['path']}.txt`（模板源文件，P1 阶段至少含 `instruction.md.txt` / `provider.toml.txt` / `mcp/mcp.json.txt`）已就位。
+- `core/workspace/templates/manifest.json`（模板清单）已定义——**P1 阶段仅 3 条 entry**（`instruction.md` / `providers/default.toml` / `mcp/mcp.json`）；清单**分阶段追加**（P1 3 → P2 +43 = 46 → P3 +7 = 53），保证每条 entry 都有对应源文件；
+- `core/workspace/templates/{entry['path']}.txt`（模板源文件，P1 阶段至少含 `instruction.md.txt` / `providers/default.toml.txt` / `mcp/mcp.json.txt`）已就位。
 
 **实现要点**：
-- `core/api.py`：`init_workspace(path, name=None, force=False) -> InitResult` 函数签名稳定 + **P1 最小实现**（校验 + **创建 workspace 根目录** + 加载模板清单；**不**渲染模板内容——P2 域）。
+- `core/api.py`：`init_workspace(path, name=None, force=False) -> InitResult` 函数签名稳定 + **P1 最小实现**（校验 + **创建 workspace 根目录**；**不**加载模板清单、**不**渲染模板内容——均属 P2 域）。
 - `core/workspace/init.py`：核心逻辑骨架：
   - `check_path(path) -> Path` — 解析为绝对路径，验证父目录存在；失败抛 `PathNotFoundError`；
   - `check_permission(path) -> None` — 验证当前用户对 path 有写权限；失败抛 `PathPermissionError`；
@@ -495,14 +499,13 @@ templates/
   3. `donkey init /root/forbidden`（无权限场景，假设 root-only 目录）→ exit 2；
   4. `donkey init /tmp/ws`（已存在 workspace，无 `--force`）→ exit 0（场景 2：幂等补齐，不报错）；
   5. `donkey init /tmp/ws --force`（已存在 workspace，传 `--force`）→ exit 0（场景 3：模板重置）；
-  6. 加载模板清单失败（如 `manifest.json` 损坏）→ exit 1（path / 权限异常的合并报错）；
-  7. **不**检查模板渲染 / 目录内容（属于 P2）；允许 init 出来的目录"仅含占位空文件"或"创建空目录"。
+  6. **不**检查模板渲染 / 目录内容（属于 P2）；允许 init 出来的目录"仅含占位空文件"或"创建空目录"。
 
 **绝对不做**：
 - 不生成 `tools/` / `skills/` 等子目录内容（推迟到 P2 / P3）；
 - **不**做"workspace 已存在则报错"的判断（幂等设计，已存在不是错误）；
 - 不挂载任何中间件（属于 F004 run 域）；
-- 不解析 `provider.toml`（属于 F002 load 域）。
+- 不解析 `providers/` 下的任何 TOML（属于 F002 load 域）。
 
 ---
 
@@ -510,49 +513,27 @@ templates/
 
 **入口条件**：
 - F001-P1 退出条件全部满足 + P1 抛出的 2 个异常类已通过单元测试；
-- `core/workspace/init.py` 中 sqlite3 schema builder 函数（构造 `sessions.sqlite3` 的 SqliteSaver 表 + `sessions_metadata` 表 + 索引；`store.sqlite3` / `knowledge.sqlite3` 仅触发空文件创建，schema 推迟到 v3；schema 由 `langgraph-checkpoint-sqlite` 的 `SqliteSaver(conn).setup()`（**实例方法**）+ donkey 自管的 6 列 + 2 索引构成）已实现 + 单元测试覆盖"空目录首次构建" + "已存在 sqlite3 跳过" + "`--force` 重建" 三场景。
+- **本 Phase 新建** `core/workspace/sqlite3_templates.py`——3 个 schema builder（构造 `sessions.sqlite3` 的 SqliteSaver 表 + `sessions_metadata` 表 + 索引；`store.sqlite3` / `knowledge.sqlite3` 仅触发空文件创建，schema 推迟到 v3；schema 由 `langgraph-checkpoint-sqlite` 的 `SqliteSaver(conn).setup()`（**实例方法**）+ donkey 自管的 6 列 + 2 索引构成），并配单元测试覆盖"空目录首次构建" + "已存在 sqlite3 跳过" + "`--force` 重建" 三场景。**该模块是 P2 自身的交付物，不在 P2 的入口条件里**（见 F001-P2 §4.7.6 / `harness/report/sessions_sqlite表结构一览.md` §2.3）。
 
 **实现要点**：
-- **6 大必填目录**（**宪法 §2.6**）：`tools/`、`mcp/`、`skills/`、`memory/`。
+- **5 大必填目录**（**宪法 §2.6**）：`tools/`、`mcp/`、`skills/`、`memory/`、**`providers/`**。
 - **必填文件**（**立项书 §4.6.1**）：
   - `instruction.md`（系统提示词模板，含占位符说明）；
-  - `provider.toml`（per-provider schema：顶层 `default_provider` + `default_model` 两个字段；每 provider 一个独立 TOML 节，含 `api_key`（TOML 明文，不读 env var）+ `api_host`（**23 个 provider 选填**，Ollama 允许 `api_host = "default"`；`openai-compatible` / `meta` / `databricks` **必填**——见调研 §10.1 / §16 Q-3）+ `models` 子表 + 6-8 个通用生成参数；详见 `harness/report/大模型toml参数设计.md §7-§8` 与 立项书 §4.6.2）。`[bedrock]` 特殊：4 个独立 `aws_*` 字段；`[baidu]` / `[iflytek]` / `[sensetime]` 在 v1 报错（exit 11），因为它们是 v2+ 自研候选（§3.5）；任何不在 §3.1 白名单 / §3.5 v2+ 候选的 provider（含此前可能列入暂不支持清单的 provider）统一走 `ProviderTomlScopeError`（exit 11），错误信息引导"改用 [openai_compatible] 或提 issue 申请 §3.1 升级评估"；详见调研报告 §3.0 Provider 治理原则。
+  - **`providers/` 目录**（per-provider schema + **一 provider 一文件**：文件名 stem == provider_id，小写 kebab-case）：
+    - `providers/default.toml`（必填，保留名）：`default_provider` + `default_model` 两个全局字段；`default_model` 必须存在于 default provider 文件的 `[models]` 表（跨文件校验 → exit 11）；
+    - `providers/<provider_id>.toml`（按需创建，init 阶段生成 26 个 stub 全部 `enabled = false`）：含 **`enabled` 开关**（缺省 `true`；`false` = 完全惰性：不校验字段 / 不要求 `api_key` / 不参与连通性检查）+ `api_key`（TOML 明文，不读 env var）+ `api_host`（**23 个 provider 选填**，Ollama 允许 `api_host = "default"`；`openai-compatible` / `meta` / `databricks` **必填**——见调研 §10.1 / §16 Q-3）+ `models` 子表（`[models.model_id]`）+ 11 个通用字段（enabled / api_key / api_host / models / timeout / max_retries / temperature / max_tokens / top_p / stop / stream）；详见 `harness/report/大模型toml参数设计.md §7` / §8.3 与 立项书 §4.6.2）。
+    - `providers/bedrock.toml` 特殊：4 个独立 `aws_*` 字段（不用 `api_key`）；`baidu` / `iflytek` / `sensetime` 在 v1 报错（exit 11），因为它们是 v2+ 自研候选（调研报告 §3.5）；任何不在调研报告 §3.1 白名单 / 调研报告 §3.5 v2+ 候选的 provider（含此前可能列入暂不支持清单的 provider）统一走 `ProviderTomlScopeError`（exit 11），错误信息引导"改用 `openai-compatible` 或提 issue 申请调研报告 §3.1 升级评估"；详见调研报告 §3.0 Provider 治理原则。
   - `mcp/mcp.json`（`{"mcpServers": {}}` 空对象模板）；
   - `skills/example/SKILL.md`（仅含 Level 1 frontmatter 占位 `name` + `description`）。
 - **支撑文件**：
   - 根 `README.md`（workspace 总览模板）；
   - `tools/README.md`（工具开发规范说明）；
-  - `mcp/README.md`、`skills/README.md`、`memory/README.md`（**memory/README.md 内容**详见下框 —— 用于向用户解释 sqlite3 是 init 阶段预创建的模板 + `--force` 会清空 + 备份要点，避免用户误删/误重置历史 session）；
+  - `mcp/README.md`、`skills/README.md`、`memory/README.md`（**memory/README.md 模板正文见 F001-P2 §4.7.5** —— 用于向用户解释 sqlite3 是 init 阶段预创建的模板 + `--force` 会清空 + 备份要点，避免用户误删/误重置历史 session）；
   - `.gitignore`（忽略 `memory/*.sqlite3`、`__pycache__/`）——**`memory/*.sqlite3` 已含在 .gitignore 模板中**。
 
-  `memory/README.md` 模板正文（写入 `core/workspace/templates/memory/README.md.txt`，F001-P2 实施时确认）：
-
-  ```markdown
-  # memory/
-
-  本目录与目录内三个 sqlite3 文件**全部是 donkey 模板**——`donkey init` 阶段统一预创建，并纳入 `templates/manifest.json` 模板清单。
-
-  - `sessions.sqlite3`（短期记忆 + 会话元数据）由 `donkey init` 阶段预创建为**带 schema 的空文件**：
-    - **SqliteSaver 自有表**（`checkpoints` / `writes`）—— message 历史；schema 由 `langgraph-checkpoint-sqlite` 管理；
-    - **`sessions_metadata` 表**（donkey 自管）—— `thread_id` ↔ `title` 映射 + `created_at` / `updated_at` / `donkey_version` / `first_prompt`，含 `idx_sessions_metadata_title` / `idx_sessions_metadata_updated_at` 索引。`donkey session list` / `remove --title` 走此表。
-  - `store.sqlite3`（长期记忆，v3 SqliteStore）：`donkey init` 阶段**仅创建空文件**——schema 全部推迟到 v3 SqliteStore 实施时（届时 Maintainer 修改 F001-P2 §4.7.6 添加 `store_items` 等建表 SQL）。
-  - `knowledge.sqlite3`（向量库，v3+ 候选）由 `donkey init` 阶段预创建空文件；schema 待向量引擎（sqlite-vec / faiss+sqlite）选型后正式化。
-
-  **`donkey init --force` 行为**（"恢复出厂设置"语义）：上述三个 sqlite3 文件会**删 + 重建**——SqliteSaver 历史与 `sessions_metadata` 元数据**一并清空**。需要保留历史的用户在 `--force` 前手动备份即可：
-
-  ```bash
-  cp memory/sessions.sqlite3 /tmp/backup-sessions.sqlite3
-  cp memory/store.sqlite3      /tmp/backup-store.sqlite3     # v3 启用后才有意义
-  cp memory/knowledge.sqlite3        /tmp/backup-knowledge.sqlite3       # knowledge 启用后才有意义
-  donkey init /path/to/ws --force
-  ```
-
-  **D-02 "运行数据可选择性导出"**仍生效：sqlite3 文件虽属模板，导出 workspace zip 时仍可按需剔除（如客户端实现 `--include-memory` flag）。
-
-  本目录由 `donkey init` 自动生成的 `.gitignore` 标记为忽略（`memory/*.sqlite3`）——sqlite3 文件不入版本控制。
-  ```
+  > `memory/README.md` 模板正文（`core/workspace/templates/memory/README.md.txt`）见 **F001-P2 §4.7.5**（唯一权威源，避免两处漂移）。
 - `core/workspace/templates/`：模板源文件（`.md.txt` / `.toml.txt` / `.json.txt`）；
-- `core/workspace/templates/manifest.json`：模板清单（列出 donkey 自动生成的所有文件路径；详见 §4.1.1）——含**文本模板**（`instruction.md` / `provider.toml` / `mcp/mcp.json` / `tools/*.py` 等）与 **sqlite3 模板**（`memory/sessions.sqlite3` / `memory/store.sqlite3` / `memory/knowledge.sqlite3`，由 `core/workspace/init.py` 在 init 阶段程序化构造；**不**在包内携带二进制 sqlite3 文件，避免 schema 漂移）；
+- `core/workspace/templates/manifest.json`：模板清单（列出 donkey 自动生成的所有文件路径；详见 §4.1.1）——含**文本模板**（`instruction.md` / `providers/*.toml` / `mcp/mcp.json` / `tools/*.py` 等）与 **sqlite3 模板**（`memory/sessions.sqlite3` / `memory/store.sqlite3` / `memory/knowledge.sqlite3`，由 `core/workspace/init.py` 在 init 阶段程序化构造；**不**在包内携带二进制 sqlite3 文件，避免 schema 漂移）；
 - `core/workspace/init.py`：新增 `render_templates(path, name, force)` 函数：
   - 遍历 `manifest.json` 中的每个模板路径（含文本模板 + sqlite3 模板）；
   - **不传 `force`**：仅当文件不存在时创建；已存在跳过；
@@ -563,7 +544,7 @@ templates/
   - **不传 `force`**：若 manifest 已存在则跳过（保留原 `created_at`）；
   - **传 `force`**：刷新 `created_at` 为当前时间；
   - 字段 `donkey_version` 记录生成本次 manifest 的 donkey 版本号（用于未来迁移提示）。
-- `--name` 参数注入：`name` 注入到 `provider.toml` 注释、`README.md` 标题、manifest。
+- `--name` 参数注入：`name` 注入到 `providers/default.toml` 注释、`README.md` 标题、manifest。
 
 **异常退出码**（详见 §3.1 表）：
 - exit 3 = `TemplateGenerationError` —— 模板骨架生成失败（合并四项：源缺失 + 渲染失败 + 文件写入失败 + sqlite3 schema 构造失败；用户修复动作相同：重装 donkey / 检查权限 / 重试 init）。
@@ -571,10 +552,10 @@ templates/
 **退出条件**：
 - `verify_phase_f001_p2.py` 通过以下断言：
   1. **场景 1**：`donkey init /tmp/empty-ws` → exit 0，目录树与立项书 §4.6.1 **逐项一致**；
-  2. 生成的 `provider.toml` 用 `tomllib` 解析无异常；
+  2. 生成的 `providers/default.toml` + 26 个 provider stub 用 `tomllib` 解析无异常；
   3. 生成的 `mcp/mcp.json` 用 `json.loads` 解析无异常；
   4. 生成的 `skills/example/SKILL.md` frontmatter 用 `python-frontmatter` 解析，含 `name` + `description`；
-  5. `--name=foo` 注入后，README 标题与 provider.toml 注释含 "foo"；
+  5. `--name=foo` 注入后，README 标题与 `providers/default.toml` 注释含 "foo"；
   6. **场景 2 幂等**：`donkey init /tmp/ws`（已存在）→ exit 0；用户手动编辑过的 `instruction.md` 内容**不变**（mtime 不变）；
   7. **场景 2 子操作**（用户损坏恢复）：`rm /tmp/ws/instruction.md` 后 `donkey init /tmp/ws` → exit 0；该文件被补齐；
   8. **场景 3 模板重置**：`donkey init /tmp/ws --force` → exit 0；用户编辑过的 `instruction.md` 也被覆盖（恢复出厂内容）；用户自建的 `media/` 目录**不动**；
@@ -614,7 +595,7 @@ templates/
   - Level 1：frontmatter `name` + `description`；
   - Level 2：Markdown 主体；
   - Level 3 目录占位：`skills/example/reference/` / `scripts/` / `templates/` 各含 1 个示例文件。
-- `core/workspace/templates/manifest.json` **追加**：把上述 5 个 builtin tool 文件 + Skills example 路径加入模板清单（P2 已有 instruction.md / provider.toml 等基础模板 + sqlite3 模板；P3 追加 builtin 模板条目）；
+- `core/workspace/templates/manifest.json` **追加**：把上述 7 条新 entry（tools/__init__.py + 3 个内置 tool + 3 个 Skills Level 3 示例）加入模板清单（P2 已有 instruction.md / `providers/` 等基础模板 + sqlite3 模板；P3 追加 builtin 模板条目）；
 - `core/workspace/init.py`：**不重复实现** `render_templates`——P2 实现的 `render_templates` 已遍历 manifest.json **全量条目**实现幂等 + `--force`；本 Phase 仅**追加** manifest 条目，运行期 `donkey init` 调用 `render_templates` 时会自动覆盖本 Phase 加入的 builtin 工具条目。具体行为：
   - 不传 `force`：仅当文件不存在时创建；已存在跳过（用户自定义 `tools/*.py` 不在清单内，不动）；
   - 传 `force`：先 `delete` 再 `create`；sqlite3 模板也会被重建（见 §4.4 P2 实现要点 + §4.1.1 "memory/ 模板边界"）。
@@ -642,7 +623,7 @@ templates/
 - 不调用 `init_chat_model` 做连通性测试（属于 F002 load 域）；
 - 不创建 sqlite3 数据库文件——`memory/*.sqlite3` 由 F001-P2 阶段作为模板预创建（含 schema builder），本 Phase 入口条件已假定 sqlite3 模板已就绪；不重复；
 - **不**做"init 后跑 F002 静态检查"——F002 静态格式检查属 F002 域；
-- 不引入 `ShellToolMiddleware` / `FilesystemMiddleware` / `FilesystemFileSearchMiddleware` 等任何 LangChain 中间件（属于 F004 run 域；**宪法 §3.2**）。
+- 不引入 `ShellToolMiddleware` / `FilesystemMiddleware` 等任何 LangChain 中间件（属于 F004 run 域；宪法 §2.7.2 禁用清单 / §2.7.1 录用清单）。
 
 ---
 
@@ -663,7 +644,7 @@ templates/
 
 | Phase | 提示词文件 | 子段（exit code 范围） | 主要工作 | Error 类 |
 |---|---|---|---|---|
-| **F002-P1** | `feature002_phase001_static_format.md` | `11-13` | 静态 1-3：`provider.toml`（伞形 `ProviderTomlLoadError`）/ `mcp.json`（`McpJsonSyntaxError`）/ `SKILL.md`（`SkillFrontmatterError`）| `ProviderTomlLoadError`（含子类）/ `McpJsonSyntaxError` / `SkillFrontmatterError` |
+| **F002-P1** | `feature002_phase001_static_format.md` | `11-13` | 静态 1-3：`providers/` 目录（伞形 `ProviderTomlLoadError`）/ `mcp.json`（`McpJsonSyntaxError`）/ `SKILL.md`（`SkillFrontmatterError`）| `ProviderTomlLoadError`（含子类）/ `McpJsonSyntaxError` / `SkillFrontmatterError` |
 | **F002-P2** | `feature002_phase002_static_dynamic_basic.md` | `14-16` | 静态 4（目录完整性）+ 动态 1-2（连通性 + sqlite） | `InstructionMissingError` / `ProviderConnectivityError` / `SqliteSchemaError` |
 | **F002-P3** | `feature002_phase003_dynamic_runtime.md` | `17-20`（已用 17-19 + 预留 20） | 动态 3-5（tools / skills / mcp loader） | `ToolLoadError` / `SkillLoadError` / `McpServerError` |
 
@@ -675,7 +656,8 @@ templates/
 ### §5.4 F002-P2 = `static_dynamic_basic`
 
 - **核心逻辑**：检查 `instruction.md` 存在性与目录结构完整性；用 `init_chat_model` + ping 验证模型连通性；用 `sqlite3` + `PRAGMA` 验证 sqlite schema（**5 项断言**：`checkpoints` 表 / `writes` 表 / `sessions_metadata` 表 6 字段 / 2 索引名 / `integrity_check`——口径以 `sessions_sqlite表结构一览.md` §7 为准）。
-- **退出条件**：删除 `instruction.md` → exit 14；`provider.toml` 填错 `api_host`（如非 URL 格式 / Bedrock 禁用 host 覆盖）→ exit 15；损坏 `sessions.sqlite3` → exit 16。**注**：出厂模板的 `api_key` 为占位符 `REPLACE_ME` 时，同样落 exit 15（连通性失败），错误消息须提示"请先把 provider.toml 中的 REPLACE_ME 换成真实 API key"（AC-1 动态口径，见立项书 §3.2.3）。
+- **退出条件**：删除 `instruction.md` → exit 14；损坏 `sessions.sqlite3` → exit 16；**模型连通性失败 → exit 15**（仅限"凭据有效但 ping 超时 / 401 鉴权失败"）。
+  > **归属边界**：`providers/` 的**字段级**错误（`api_host` 非 URL 格式 / Bedrock 禁 host 覆盖 / 云端 provider 空 `api_key` / `api_key` 类型错 / scope 越界 / 零 enabled provider）**全部属 F002-P1 静态检查 → exit 11 伞形**（子类见 §3.2.1；调研 §7.3 / §9.1.1 / §9.2），**不走 exit 15**。特别地：云端 provider 的**空 `api_key` 在构造期**即被拒（`Missing credentials`）→ exit 11；出厂 stub 的 `api_key = ""` 因 `enabled = false` 完全惰性、不触发任何检查（**`REPLACE_ME` 占位符已于 v1 废除**，见立项书 §3.2.3 ③）。
 
 ### §5.5 F002-P3 = `dynamic_runtime`
 
@@ -737,7 +719,7 @@ templates/
 | **F004-P2** | `feature004_phase002_skills.md` | 段位 `41-50`（已用 41-43 + 预留 44-50） | Skills 加载 | 扫描 `skills/*/SKILL.md` → 自研渐进披露 loader | `SkillFrontmatterParseError` / `SkillToolRegisterError` / `SkillLoadBodyError` |
 | **F004-P3** | `feature004_phase003_mcp.md` | 段位 `51-60`（已用 51-53 + 预留 54-60） | MCP server | 加载 `mcp/mcp.json` → `MCPAdapter` | `McpConfigError` / `McpServerConnectError` / `McpToolCallError` |
 | **F004-P4** | `feature004_phase004_saver.md` | 段位 `61-70`（已用 61-63 + 预留 64-70） | 短期记忆（Saver） | 挂 `SqliteSaver(memory/sessions.sqlite3)` | `SaverOpenError` / `SaverWriteError` / `SaverReadError` |
-| **F004-P5** | `feature004_phase005_store.md` | 段位 `71-80`（已用 71-73 + 预留 74-80） | 长期记忆（Store） | v1 用 `InMemoryStore`（极少触发）；v3 自研 SqliteStore 用这 3 个码 | `StoreOpenError` / `StoreWriteError` / `StoreReadError` |
+| **F004-P5** | `feature004_phase005_store.md` | 段位 `71-80`（**71-73 = v3 占位，v1 不实装** + 预留 74-80） | 长期记忆（Store） | v1/v2 用 `InMemoryStore`（不落盘、极少触发）；v3 自研 SqliteStore 才启用这 3 码 | `StoreOpenError` / `StoreWriteError` / `StoreReadError`（**v3**） |
 | **F004-P6** | `feature004_phase006_middleware.md` | 段位 `81-90`（10 码全部实装，无预留） | 中间件 | 10 项 v1 中间件挂载 + 错误处理 | `ToolErrorMiddlewareError` / `ToolRetryMiddlewareError` / `ModelRetryMiddlewareError` / `SummarizationMiddlewareError` / `ModelCallLimitMiddlewareError` / `PIIMiddlewareError` / `TodoListMiddlewareError` / `LLMToolSelectorMiddlewareError` / `ContextEditingMiddlewareError` / `ModelAuthenticationError` |
 | **F004-P7** | `feature004_phase007_agent_loop.md` | 段位 `91-100`（已用 91-94 + 预留 95-100） | Agent Loop | LangGraph 主图编译 + 状态机 | `GraphCompileError` / `StateSchemaError` / `NodeTypeError` / `EdgeConnectError` |
 
@@ -796,16 +778,34 @@ templates/
 F001 → F002 → F003 → F004 → F005 → F006 → 三套官方模板 → Release v1.0.0
 ```
 
-每个 Feature 内部 Phase 严格串行；跨 Feature 可滚动并行（详见 §10.2）。
+每个 Feature 内部 Phase 严格串行；跨 Feature 的推进关系以 §12.2 准入条件链为准（详见 §10.2）。
 
-### §10.2 跨 Feature 滚动策略（来自立项书 §5.2.1 + 宪法 §4.3）
+### §10.2 跨 Feature 推进策略（以 §12.2 准入条件链为唯一依据）
 
-| 时段 | 可并行任务 |
-|---|---|
-| **时段 A（F001 / F002 启动期）** | F001-P1 + F002-P1 可并行（共享 `core/exit_codes.py` + `core/exceptions.py`） |
-| **时段 B（F003 启动期）** | F001-P2/P3 + F002-P2 + F003-P1 可并行 |
-| **时段 C（F004 启动期）** | F002-P3 + F003-P2/P3/P4 + F004-P1~P7 可并行 |
-| **时段 D（F005 / F006 启动期）** | F005 7 子段 + F006 3 子段 + 三套官方模板可并行；CLI 渐进补齐穿插 |
+**门控关系（来自 §12.2「准入条件」列，不可自相矛盾）**：
+
+```
+F001-P1 → F001-P2 → F001-P3
+       → F002-P1 → F002-P2 → F002-P3
+       → F003-P1 → … → F003-P4
+       → F004-P1 → … → F004-P7
+       → F005-P1 → … → F005-P7
+       → F006-P1 → … → F006-P3
+
+规则：同 Feature 内 Phase 串行；每个 Feature 的 P1 准入 = 上一个 Feature 全部 Phase 退出
+```
+
+**结论（按上表逐条读出来的真实约束）**：
+
+| # | 结论 | 依据 |
+|---|---|---|
+| 1 | **Feature 内部 Phase 严格串行** | 宪法 §4.3 + §12.2 准入链（F00N-P2 准入 = F00N-P1 退出，依此类推） |
+| 2 | **Feature 之间是门控串行**——F00(N+1) 的 P1 准入 = F00N **全部** Phase 退出 | §12.2 准入条件列（F002-P1 = F001 3 Phase 全退出；F003-P1 = F002 3 Phase 全退出；…） |
+| 3 | 因此 §10.1 的关键路径 `F001 → F002 → … → F006` 就是**唯一无冲突的推进顺序**；**同一时刻不存在"两个 Feature 的 Phase 同时在写 `core/`"的情况** | 结论 1 + 2 |
+| 4 | **真正可并行的只有横切任务**：CLI 渐进补齐（贯穿 F001–F004）、文档 / fork 指南（贯穿全程）、三套官方模板（v1 收尾） | §10.3 + 立项书 §5.4 甘特图 |
+| 5 | 宪法 §4.3 的"同一时段并行多个 Feature 的同 Phase 任务"是**方法层面允许**，但按 §12.2 的准入链，v1 baseline 下**没有一对 Feature 满足并行准入**——若 Maintainer 要并行，必须**显式放宽某个 Phase 的准入条件**并写进该 Phase 的提示词文件（不自动推断） | 宪法 §4.3 + §12.2 |
+
+> **⚠️ 口径澄清（避免把 §10.2 读成"可以随便并行"）**：本节表格是**门控关系图**，不是"时段 × 可并行任务"的排期表。按 §12.2 准入链，v1 baseline 的 27 个 Phase 实际是**串行**推进的（单人 + Speckit 辅助下这正是 §5.4 甘特图 T0+47w 的由来）；旧版表格里"F002-P1 + F001-P1 可并行""F004-P1~P7 可并行"等说法与准入链冲突，已删除。
 
 ### §10.3 客户端开发顺序（洋葱架构）
 
@@ -823,7 +823,7 @@ F001 → F002 → F003 → F004 → F005 → F006 → 三套官方模板 → Rel
 - 编程型 workspace（编程人格 + 编程 Skills + 编程 Tools + 模型选型）
 - 技能型 workspace（SOP 沉淀型 Skills 集）
 
-> 三套模板**不承诺**提供 diff 审阅（**宪法 N-11 / 立项书 AC-5**）；如需 diff，走 fork 路线。
+> 三套模板**不承诺**提供 diff 审阅（**宪法 §2.1 结论 3 / 立项书 AC-5**）；如需 diff，走 fork 路线。
 
 ---
 
@@ -843,20 +843,22 @@ F001 → F002 → F003 → F004 → F005 → F006 → 三套官方模板 → Rel
 | `1-10` | F001 init | 10 | 4（1-4 连号）| 0 | 6（5-10）| 3 |
 | `11-20` | F002 load | 10 | 9（11-19）| 0 | 1（20）| 3 |
 | `21-30` | F003 session | 10 | 7（21-27）| 3（28-30 = import v1.x 落地，立项书 §5.5.4.4）| 0 | 4 |
-| `31-100` | F004 run | 70 | 30 | 0 | 40 | 7 |
+| `31-100` | F004 run | 70 | 27 | 0 | 43 | 7 |
 | `101-170` | F005 web | 70 | 22 | 0 | 48 | 7 |
 | `171-200` | F006 gui | 30 | 11 | 0 | 19 | 3 |
 | `201+` | v2/v3/v4 扩展 | 全部 | 0 | 0 | 全部 | — |
-| **合计 v1.0.0 范围** | — | **201** | **84** | **3** | **114** | **27** |
+| **合计 v1.0.0 范围** | — | **201** | **81** | **3** | **117** | **27** |
 
-**总分配**：84 个 v1 实装（含 OK 的 1 码 → 83 个 Error class 码）+ 3 个 v1 留接口位 + 114 个预留码 = **201 个码值**（立项书 §5.5.3 段位分配总表完整覆盖；与 §3.1~§3.6 加总一致）。
+**总分配**：81 个 v1 实装（含 OK 的 1 码 → 80 个 Error class 码）+ 3 个 v1 留接口位 + 117 个预留码 = **201 个码值**（立项书 §5.5.3 段位分配总表完整覆盖；与 §3.1~§3.6 加总一致）。
+
+> **与宪法 §4.4「每段位预留 10 个码值」原则的偏离（有意为之，已核对）**：F001 预留 6（实装 1-4 连号）、F002 预留 1（实装 11-19，9 项检查已占满）、F003 预留 0（28-30 是 import 的 v1.x 留接口位，不是通用错误预留）——这三条是**实装密度高导致的自然结果**，不是漏分配；F004~F006 仍按每子段 10 码整段预留。
 
 **段位内"未绑定 v1 实装 Error"比例**（v1 留接口位 + 预留码）/ 总码值：
 
 - **F001**：6/10 = **60%**（init 是简单存活检查，4 个错误码已覆盖所有场景——实际使用 1-4 连号，5-10 预留）
 - **F002**：1/10 = **10%**（静态 + 动态 9 项检查全覆盖，几乎没有冗余；实际使用 11-19，20 预留）
 - **F003**：3/10 = **30%**（4 个二级命令中 3 个 v1 实装 = 7 个 Error class + import v1 留接口位 = 3 码；不预留段位内通用码位——立项书 §5.5.3 "本段位由 4 个二级命令均分 + 保留" 表述中"保留"实际指 28-30 = import v1.x 落地占位，并非通用错误预留）
-- **F004**：40/70 ≈ **57%**（大 Feature + v3 接入预留 + 中间件扩展预留；P5 Store 预埋 3 码 `StoreOpenError` / `StoreWriteError` / `StoreReadError` 给 v3 SqliteStore；**注意：F004-P6 段位 81-90 的 10 码已全部实装（81-89 中间件错误 + 90 鉴权错误），本子段无预留**——新增中间件错误统一从 P7 预留 95-100 借位）
+- **F004**：43/70 ≈ **61%**（大 Feature + v3 接入预留 + 中间件扩展预留；**P5 段位 71-73 的 3 码（`StoreOpenError` / `StoreWriteError` / `StoreReadError`）是 v3 占位、v1 不实装**——v1/v2 用 `InMemoryStore` 不落盘不抛错，见立项书 §5.5.5；**注意：F004-P6 段位 81-90 的 10 码已全部实装（81-89 中间件错误 + 90 鉴权错误），本子段无预留**——新增中间件错误统一从 P7 预留 95-100 借位）
 - **F005**：48/70 ≈ **69%**（前端领域未探索，重在预留）
 - **F006**：19/30 ≈ **63%**（最薄壳，预留适度）
 
@@ -877,7 +879,7 @@ featurexxx_phasexxx_<phase_name>.md
 - 第一个 `xxx`：3 位数字，左侧补 0，与 F 编号一致（`001` = F001，`002` = F002，…）；
 - 第二个 `xxx`：3 位数字，左侧补 0，与 Phase 编号一致（`001` = 同 Feature 内第 1 个 Phase；`002` = 第 2 个；以此类推；**不**跨 Feature 复用——`feature001_phase001` 与 `feature002_phase001` 是两个不同 Phase）；
 - `<phase_name>`：英文短横线连字符（kebab-case），与 §X.Y 章节标题保持一致；
-- **v1 baseline：1 Phase = 1 提示词文件 = 1 次 `/speckit.specify` 闭环**（spec → plan → tasks → implement → verify）；27 Phase = 27 文件（详见 §12.2）；
+- **v1 baseline：1 Phase = 1 提示词文件 = 1 次 `/speckit.specify` 闭环**（见 §12.4）；27 Phase = 27 文件（详见 §12.2）；
 - 例：`feature001_phase001_cli_validation.md`、`feature003_phase002_new.md`、`feature004_phase006_middleware.md`。
 
 **配套 verify 脚本路径**（详见立项书 §4.1.1 `tests/` 目录约定）：
@@ -888,12 +890,14 @@ tests/e2e/phase/verify_phase_f<XXX>_p<Y>.py
 
 - `verify_phase_<f>_<n>.py` 与提示词文件 1:1 对应（v1 baseline 27 = 27）；
 - pytest 风格，**黑盒测试**：只跑 `subprocess.run(["donkey", "init", ...])` 验证 exit code 与文件系统副作用，**不** import `donkey.*` 业务代码；
-- CI 集成：`.github/workflows/ci.yml` 跑 `pytest tests/` 一键触发；Maintainer 评审单个 Phase 时 `pytest tests/e2e/phase/verify_phase_<f>_<n>.py` 单独跑；
+- CI 集成：`.github/workflows/ci.yml` 跑 `pytest tests/` 一键触发（**文件待建**——仓库当前尚无 .github/ 与 tests/ 目录）；Maintainer 评审单个 Phase 时 `pytest tests/e2e/phase/verify_phase_<f>_<n>.py` 单独跑；
 - 例：`tests/e2e/phase/verify_phase_f001_p1.py` ↔ `feature001_phase001_cli_validation.md`。
 
 ### §12.2 提示词文件 ↔ Phase 映射表（v1 启动期 baseline）
 
 > **当前粒度**：1 Phase = 1 提示词文件（27 Phase = 27 文件）；如未来某 Phase 工作量超出 1 次 `/speckit.specify` 闭环（如 F004-P6 middleware 10 错误 + 10 中间件），需 Maintainer 显式决策拆 / 合（**不**自动推断；如拆：1 Phase 拆为 2 文件，文件名按"phase 编号 + 后缀"，如 `feature004_phase006_middleware_register.md` / `_runtime.md`）。
+>
+> **落地状态（v1 启动期）**：上表 27 个提示词文件中，**已就绪 3 个**——F001-P1 / F001-P2 / F001-P3（`harness/features/feature001_phase001_cli_validation.md` / `feature001_phase002_template_skeleton.md` / `feature001_phase003_builtin_tools.md`）；**其余 24 个待创建**（F002~F006），按上表"准入条件"列逐个解锁。
 >
 > **准入条件缩写**："F001-P1 退出条件" = §4.3 "退出条件" 全部跑出 PASS；"无前置" = 仓库初始化即可启动。
 >
@@ -903,8 +907,8 @@ tests/e2e/phase/verify_phase_f<XXX>_p<Y>.py
 
 | # | 提示词文件 | 覆盖 Phase | 段位 | 已用 exit code | 准入条件 | 验证脚本 | 闭环复杂度 |
 |---|---|---|---|---|---|---|---|
-| 1 | `feature001_phase001_cli_validation.md` | F001-P1 | `1-2` | 1, 2 | 无前置 | `verify_phase_f001_p1.py` | 低（7 断言） |
-| 2 | `feature001_phase002_template_skeleton.md` | F001-P2 | `3` | 3 | F001-P1 退出条件 | `verify_phase_f001_p2.py` | 中（15 断言） |
+| 1 | `feature001_phase001_cli_validation.md` | F001-P1 | `1-2` | 1, 2 | 无前置 | `verify_phase_f001_p1.py` | 低（6 断言） |
+| 2 | `feature001_phase002_template_skeleton.md` | F001-P2 | `3` | 3 | F001-P1 退出条件 | `verify_phase_f001_p2.py` | 中（14 断言） |
 | 3 | `feature001_phase003_builtin_tools.md` | F001-P3 | `4` | 4 | F001-P2 退出条件 | `verify_phase_f001_p3.py` | 中（11 断言） |
 | 4 | `feature002_phase001_static_format.md` | F002-P1 | `11-13` | 11, 12, 13 | F001 3 Phase 全退出 | `verify_phase_f002_p1.py` | 中 |
 | 5 | `feature002_phase002_static_dynamic_basic.md` | F002-P2 | `14-16` | 14, 15, 16 | F002-P1 退出条件 | `verify_phase_f002_p2.py` | 中 |
@@ -948,7 +952,7 @@ tests/e2e/phase/verify_phase_f<XXX>_p<Y>.py
 ### §12.4 Speckit 工作流串联
 
 ```
-1. Maintainer 在 §12.2 选下一个未完成 Phase（按 §10.2 跨 Feature 滚动策略）
+1. Maintainer 在 §12.2 选下一个未完成 Phase（按 §10.2 跨 Feature 推进策略 / 门控关系）
 2. 新开会话执行 /speckit.specify + featurexxx_phasexxx_<phase_name>.md
    → 生成 specs/<branch>/spec.md
 3. （可选 1-2 轮）/speckit.clarify → 消除歧义
@@ -989,5 +993,8 @@ tests/e2e/phase/verify_phase_f<XXX>_p<Y>.py
 |  | `harness/report/关于subagent的实现方式.md` | subagent 路线 A/B 选型 |
 |  | `harness/report/内置工具应该自己实现还是调用中间件.md` | 三大内置 `@tool` 设计决策 |
 |  | `harness/report/LangGraph的节点到底是什么东西.md` | 中间件 hook 风格 → 节点数映射 |
-|  | `harness/report/大模型toml参数设计.md` | **`provider.toml` schema 权威**（26 家白名单 / 字段全集 / 三档鉴权 / exit 11 校验清单） |
+|  | `harness/report/大模型toml参数设计.md` | **`providers/` 目录 schema 权威**（26 家白名单 / 字段全集 / `enabled` 开关 / 三档鉴权 / exit 11 校验清单） |
 |  | `harness/report/sessions_sqlite表结构一览.md` | **sqlite3 schema 权威**（v1 baseline = sessions schema-built / store+knowledge v1 占位；F002-P2 健康检查 5 项断言口径） |
+| **提示词文件（已就绪）** | `harness/features/feature001_phase001_cli_validation.md` / `feature001_phase002_template_skeleton.md` / `feature001_phase003_builtin_tools.md` | F001-P1 / P2 / P3 三个提示词文件已就绪 |
+|  | 后续 24 个提示词文件待创建（见 §12.2 映射表） | F002~F006 的 Phase 提示词文件尚未落地 |
+| **历史留档** | `harness/features/宪法初稿.md`（已被 .specify/memory/constitution.md 取代，不具治理效力）、`harness/features/立项书-大纲目录.md` | 仅供追溯，不具治理效力 |

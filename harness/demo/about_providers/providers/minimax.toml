@@ -1,0 +1,25 @@
+# =============================================================================
+# providers/minimax.toml —— MiniMax（OpenAI 兼容 + Coding Plan `sk-cp-` 密钥）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key）
+#   3. 在 providers/default.toml 里设置 default_provider = "minimax" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = true
+
+# 注：MiniMax 主流用法是 Coding Plan（订阅密钥 sk-cp-...）+ OpenAI 兼容端点
+# https://api.minimaxi.com/v1。thinking 以 <think>...</think> 标签保留在 content，
+# 应用层用正则提取（见设计文档 §3.6）。
+api_key = "sk-cp-REPLACE_ME"      # 🔒 脱敏版占位符——真实 key 写进 providers.local/
+api_host = "https://api.minimaxi.com/v1"
+timeout = 60
+max_retries = 6
+temperature = 0.7
+max_tokens = 4096
+
+[models.MiniMax-M3]
+max_tokens = 8192

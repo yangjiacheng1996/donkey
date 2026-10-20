@@ -2,15 +2,16 @@
 
 > **核心立场**：智能体与大模型 provider 之间的交互应遵循**三层架构**（网络层透传 / 解析层严谨 / 应用层抽象），口号"**传输的时候要透传，解析的时候要严谨**"。
 > **白名单范围**：本项目 v1 适配 **26 个 LangChain 官方支持的世界主流 provider**——6 个原生闭源大厂 + 8 个 OpenAI 兼容（中文 7：qwen 默认 / doubao / kimi 默认 / MiniMax / zhipu / tencent / stepfun；国际 1：openai-compatible 元 provider）+ 8 个国际云推理 + 1 个本地 Ollama + 1 个 ChatOpenRouter 元 provider + 2 个多平台路由（meta / xiaomi）+ 4 个推理模型专用类（`ChatDeepSeek` / `ChatQwQ` for QwQ / `ChatQwen` for Qwen3 / `ChatMoonshot`）。详见 §3.1。**v1 不自研任何解析类**，所有 provider 复用 LangChain 官方类。**v2+ 候选**（3 个需自研：baidu / iflytek / sensetime）见 §3.5。**黑名单与暂不支持清单当前均空**——任何 provider 入列须按 §3.0 Provider 治理原则走硬理由 + GitHub issue + 社区评审 ≥14 天流程。
-> **配置理念**：**仿效 Cherry Studio 的 per-provider schema + 明文鉴权**，但**不仿效其"自定义参数"口子**——donkey 用 LangChain 严格 schema 保证字段拼写错误在 F002 load 阶段就抓到；`api_key` 仅允许 TOML 明文（不读环境变量，保证 workspace 跨 OS 行为一致）；`api_host` 23 个 provider 可选（Ollama 允许 `api_host = "default"` 特殊值；`openai-compatible` / `meta` / `databricks` 必填）。
+> **配置理念**：**仿效 Cherry Studio 的 per-provider schema + 明文鉴权 + per-provider 开关**，但**不仿效其"自定义参数"口子**——donkey 用 LangChain 严格 schema 保证字段拼写错误在 F002 load 阶段就抓到；`api_key` 仅允许 TOML 明文（不读环境变量，保证 workspace 跨 OS 行为一致）；`api_host` 23 个 provider 可选（Ollama 允许 `api_host = "default"` 特殊值；`openai-compatible` / `meta` / `databricks` 必填）。
+> **配置布局（v1）**：**`providers/` 目录 + 一 provider 一文件**——`providers/<provider_id>.toml`（文件名 stem == provider_id，小写 kebab-case）+ `providers/default.toml`（全局 `default_provider` / `default_model`）；每个 provider 文件含 **`enabled` 开关**（缺省 `true`；`false` = 完全惰性）。**取代 v0 草案的单文件 `provider.toml` + 26 个 provider 节**。详见 §7.1 / §7.2 / §7.3。
 > **本报告立场**：**v1 100% 复用 LangChain**——6 个 provider 走独立 LangChain 类（`ChatOpenAI` / `ChatAnthropic` / `ChatGoogleGenerativeAI` / `ChatOllama` / `ChatXAI` / `ChatMistralAI`）、8 个走国际云推理类（`ChatBedrock` / `ChatGroq` / `ChatFireworks` / `ChatTogether` / `ChatCohere` / `ChatPerplexity` / `ChatDatabricks` / `ChatCerebras`）、8 个 OpenAI 兼容薄包装（中文 7：qwen 默认 / doubao / kimi 默认 / MiniMax / zhipu / tencent / stepfun；国际 1：openai-compatible 元 provider）+ 1 个 `ChatOpenRouter`（openrouter 元 provider）、2 个多平台路由（meta / xiaomi）、4 个推理模型专用类（`ChatDeepSeek` / `ChatQwQ` / `ChatQwen` / `ChatMoonshot` 保留 reasoning_content）。**零自研**。详见 §3.2 / §15。
 >
 > **核心补充**：
 > - **TOML loader 强约束**（详见 §9.1.1）：donkey 解析 TOML 时必须把缺失的 `api_key` 映射为 `""`（空串），**绝不返回 `None`**，否则触发 LangChain `_resolve_gateway_config` 内部 env var 回退（`OPENAI_API_KEY` 等），违背"donkey 不读 env var"立场。
-> - **`[bedrock]` 改用独立 `aws_*` 字段**（详见 §8）：与 §9.1 立场完全对齐——通过 `boto3.Session(aws_access_key_id=..., aws_secret_access_key=..., region_name=...)` 显式构造，boto3 不会读 env var 或 `~/.aws/credentials`。
+> - **`providers/bedrock.toml` 改用独立 `aws_*` 字段**（详见 §8.3）：与 §9.1 立场完全对齐——通过 `boto3.Session(aws_access_key_id=..., aws_secret_access_key=..., region_name=...)` 显式构造，boto3 不会读 env var 或 `~/.aws/credentials`。
 > **本文档不依赖任何特定项目**：纯通用调研，可被任何基于 LangChain 的智能体项目直接参考。
 >
-> **实测校验**：本报告的核心主张已由端到端 demo `harness/demo/about_providers/provider.py` 用**两个真实模型**（MiniMax-M3 / deepseek-v4-flash）逐条验证，**63 项断言全绿 / 0 FAIL / 0 SKIP**；逐条结论见 demo 的 docstring。
+> **实测校验**：本报告的核心主张已由端到端 demo `harness/demo/about_providers/provider.py` 用**两个真实模型**（MiniMax-M3 / deepseek-v4-flash）逐条验证，**63 项断言全绿 / 0 FAIL / 0 SKIP**（v1 目录化改造后：**52 项离线 load 断言重跑全绿**，新增 4 组用例覆盖 `enabled` 惰性 / 零 enabled / 默认项跨文件不一致 / 文件名大小写）；逐条结论见 demo 的 docstring。
 
 ---
 
@@ -20,7 +21,7 @@
 |---|---|
 | 项目 Maintainer 决策 | §1（核心主张）+ §2（三层架构）+ §3（白名单）+ §16（决策速查） |
 | F001-P2 / F002-P1 spec 作者 | §7（全局结构）+ §8（每个 provider schema）+ §9（鉴权）+ §10（base_url） |
-| provider 解析代码作者 | §2.3（解析层原则）+ §15（解析代码结构）+ §8（具体 provider 参数） |
+| provider 解析代码作者 | §2.3（解析层归属与严谨要求）+ §15（解析代码结构）+ §8（具体 provider 参数） |
 | Web UI 设计师 | §12（Web UI 考量） |
 | 安全 / 审计 | §13（安全性考量） |
 | 想知道"未来怎么扩展" | §14（扩展性） |
@@ -50,7 +51,9 @@
 >
 > **3. 网络层**：在传输解析层发出的数据，并返回响应时，**需要保持透传**，网络层不应该修改任何数据。
 
-### 1.3 五条设计原则
+> **v1 落地结论（重要，避免误读）**：这三条主张的**语义**全部成立，但**归属**在 v1 已经确定——解析层由 **LangChain 各 provider 包**承担（逐个 provider 的解析 class LangChain 已全部实现，donkey **零自研**，见 §2.3 / §15.1）、网络层由 **LangChain 的 httpx 客户端**承担（§2.2）；donkey 自研的只有两处：**应用层薄壳**（`application/facade.py`）+ **配置层严格校验**（F002 load，§7.3 / §11.1）。第 1 条主张里的"逐个开发解析 class"是**职责要求**（解析必须严谨），不是**实现要求**（必须由 donkey 写）。
+
+### 1.3 七条设计原则
 
 | 编号 | 原则 | 理由 |
 |---|---|---|
@@ -59,6 +62,10 @@
 | **P-3** | **`api_host` 对所有 provider 可选**（Ollama 允许 `api_host = "default"` 特殊值） | 减少用户认知负担；Ollama 小白用户友好 |
 | **P-4** | **Provider 白名单硬限**（v1 = 26 家；v2+ 候选 3 家需自研；v1 范围内无永久黑名单 / 无暂不支持清单成员） | 不为冷僻 provider 写代码；v1 100% 复用 LangChain；v2+ 候选按 §3.5 流程添加；列入永久黑名单必须按 §3.0 原则走硬理由 + GitHub issue 流程 |
 | **P-5** | **解析代码尽量复用 LangChain；不解析的字段拒绝写入 schema** | 避免 `[provider.extra]` 透传陷阱；字段拼写错误在 F002 load 阶段就能抓到 |
+| **P-6** | **配置布局 = `providers/` 目录，一 provider 一文件**（文件边界 = schema 边界） | 单文件 26 节模板臃肿、无法一目了然；per-provider 文件让"支持哪些供应商"= 目录列表，provider 增删改 = 单文件 diff，错误可精确定位到文件 |
+| **P-7** | **每个 provider 文件带 `enabled` 开关；禁用态完全惰性** | 对齐 Cherry Studio 的 per-provider toggle；"暂存配置"不阻塞 load；未启用的 provider 不要求填 `api_key`（免掉 `REPLACE_ME` 占位符 hack） |
+
+> **P-6 / P-7 的来源**：v0 草案把 26 个 provider 塞进一个 `provider.toml`，与 P-1 "per-provider 独立 schema"在**文件层**自相矛盾（字段隔离了、文件没隔离）；同时被迫引入 `api_key = "REPLACE_ME"` 占位符来骗过"空 key = 硬错 exit 11"的静态检查。目录化 + 开关一次性消掉这两个矛盾。
 
 ### 1.4 仿效对象：Cherry Studio
 
@@ -67,78 +74,86 @@ Cherry Studio 是国内流行的多 provider 桌面 AI 客户端，其 LLM 配�
 - **每个 provider 一个独立配置节**（`[openai]` / `[anthropic]` / `[ollama]` / ...）；
 - **`apiKey` + `apiHost`（即 baseURL）是 provider 顶层字段**；
 - **每个 provider 下挂一个 `models` 列表**，每个 model 可独立配置生成参数；
+- **每个 provider 有独立开关**（可启用 / 停用某个供应商，不影响其它供应商）；
 - **不**使用统一 schema + 扩展口模式；
 - **鉴权 key 明文写死在用户配置文件中**（不读环境变量）。
 
-**本项目沿用** Cherry Studio 的 **per-provider schema + 明文鉴权** + **models 列表** 三项核心；
+**本项目沿用** Cherry Studio 的 **per-provider schema + 明文鉴权 + models 列表 + per-provider 开关** 四项核心；
 **不沿用** Cherry Studio 的 **"自定义参数"口子**——Cherry Studio 允许用户在 GUI 里填任意 key=value（用于适配某些国内 / 海外小众 provider 的"神秘字段"），但 donkey 走 LangChain 严格 schema 路线（P-5），所有已知参数显式声明在 schema，字段拼写错误在 F002 load 阶段就抓到，不延迟到运行时。
 
-本项目在 schema 严格性、解析严谨性、跨协议抽象上用 LangChain 加固。
+本项目在 schema 严格性、解析严谨性、跨协议抽象上用 LangChain 加固；**并把 Cherry Studio 的"GUI 里的独立配置节"落成"文件系统里的独立文件"**（P-6）——GUI 的 tab / toggle 对应文件系统的 `providers/<id>.toml` / `enabled` 字段，两端同一套心智模型。
 
 ---
 
 ## 2. 设计哲学：三层架构
 
+> **先读这条——三层架构是"语义分层"，不等于 donkey 要自研三层**。它描述的是"智能体与大模型之间职责怎么切"，v1 的落地归属如下：
+>
+> | 层 | 语义职责 | v1 由谁实现 | donkey 自研量 |
+> |---|---|---|---|
+> | **网络层** | 透传：只连接 / 发 bytes / 收 bytes / 超时切断 | LangChain + `langchain-core` 的 httpx 客户端 | **0**（唯一自研是"代理 env 防御性清洗"这一处**环境适配**，见 §9.4；它不改网络语义） |
+> | **解析层** | 严谨：统一消息 ↔ provider 专有格式双向翻译 | LangChain 各 provider 包（`ChatOpenAI` / `ChatAnthropic` / ...） | **0**（v1 零自研；§15 只有 1 个 `ReusableProvider` 抽象基类） |
+> | **应用层** | 抽象：业务代码只面对统一接口 | donkey `application/facade.py` | 薄层（构造 + 透传，不含 provider 分支） |
+>
+> **donkey 在解析层唯一不可让渡的职责是"配置层严谨"**：per-provider 严格 schema 校验（F002 load，§7.3 / §11.1）——字段拼写错误 / 类型错 / 越界在 load 阶段 exit 11，不延迟到运行时。
+
 ### 2.1 三层架构总览
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    应用层 (Application Layer)                     │
-│  - 高级抽象：ChatModel.invoke(messages) → AIMessage              │
-│  - 工具调用：tool_calls / structured output 统一接口             │
-│  - 复用 LangChain BaseChatModel 抽象                             │
+│                    应用层 (Application Layer)                   │
+│  - 高级抽象：ChatModel.invoke(messages) → AIMessage             │
+│  - 工具调用：tool_calls / structured output 统一接口            │
+│  - 复用 LangChain BaseChatModel 抽象                            │
+│  - v1 归属：donkey 自研薄层（application/facade.py）            │
 └─────────────────────────────────────────────────────────────────┘
-                            ↑ 高级抽象
+                             ↑ 高级抽象
 ┌─────────────────────────────────────────────────────────────────┐
-│                   解析层 (Parsing Layer)                          │
-│  - per-provider 解析 class：ProviderParser                       │
-│    ├── openai.py    → OpenAIRequestParser / OpenAIResponseParser │
-│    ├── anthropic.py → AnthropicRequestParser / ...              │
-│    ├── ollama.py    → OllamaRequestParser / ...                 │
-│    └── ... (26 个 provider)                                     │
-│  - 输入：langchain 统一消息 + 工具 schema                          │
-│  - 输出：provider 专有 JSON / SSE bytes                          │
-│  - 输入：provider 专有响应                                         │
-│  - 输出：langchain AIMessage / ToolCall / UsageMetadata          │
-│  - 严谨：每个字段类型 / 取值范围 / 必填性按 provider 文档强校验     │
+│                   解析层 (Parsing Layer)                        │
+│  - per-provider 解析 class（LangChain 官方包内已实现）          │
+│    ├── langchain-openai    → ChatOpenAI                         │
+│    ├── langchain-anthropic → ChatAnthropic                      │
+│    ├── langchain-ollama    → ChatOllama                         │
+│    ├── langchain-deepseek  → ChatDeepSeek（保留 reasoning）     │
+│    └── ... (26 个 provider → 14 独立类 + 8 ChatOpenAI 薄包装    │
+│              + ChatOpenRouter + ChatDeepSeek，详见 §3.2）       │
+│  - 输入：langchain 统一消息 + 工具 schema                       │
+│  - 输出：provider 专有 JSON / SSE bytes                         │
+│  - 输入：provider 专有响应                                      │
+│  - 输出：langchain AIMessage / ToolCall / UsageMetadata         │
+│  - 严谨：字段类型 / 取值范围 / 必填性由 §7.3 在配置层强校验     │
+│  - v1 归属：零自研（§15.1 仅 1 个 ReusableProvider 抽象基类）   │
 └─────────────────────────────────────────────────────────────────┘
                             ↑ 解析后的结构化数据
 ┌─────────────────────────────────────────────────────────────────┐
-│                    网络层 (Network Layer)                         │
-│  - 透传 HTTP：httpx.AsyncClient.send(request) → response         │
-│  - 不解析任何 body；不修改任何 header；不重试                       │
-│  - 仅负责：建立连接 / 发送 bytes / 接收 bytes / 超时切断 / 流式分片 │
-│  - 上游传什么就发什么；下游返回什么就交给上游                       │
+│                    网络层 (Network Layer)                       │
+│  - 透传 HTTP：httpx.AsyncClient.send(request) → response        │
+│  - 不解析任何 body；不修改任何 header；不重试                   │
+│  - 仅负责：连接 / 发收 bytes / 超时切断 / 流式分片              │
+│  - 上游传什么就发什么；下游返回什么就交给上游                   │
+│  - v1 归属：LangChain / langchain-core 的 httpx 客户端（零自研）│
 └─────────────────────────────────────────────────────────────────┘
                             ↑ 透明传输
 ┌─────────────────────────────────────────────────────────────────┐
-│                      provider API                                │
+│                      provider API                               │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ### 2.2 网络层：透传
 
-**职责**：
+**语义职责**：
 
 - 用 `httpx.AsyncClient` 发起 HTTP / HTTPS / SSE 请求；
 - **不**解析 body（bytes 直接发送）；
-- **不**修改 header（仅在 transport wrapper 注入 `Authorization` / `Content-Type` 等必须 header）；
-- **不**重试（重试是 LangChain `max_retries` 中间件的事，不在 transport）；
+- **不**修改 header（鉴权 header 由 LangChain 的 ChatModel 自己注入——donkey 只把 TOML 里的 `api_key` 明文传进去，见 §9.1）；
+- **不**重试（重试是 LangChain `max_retries` 的事，不在 transport）；
 - **不**记录日志中的 body（避免密钥 / 用户隐私泄露）。
 
-**接口**（伪代码）：
+**v1 归属**：网络层由 **LangChain / `langchain-core` 的 httpx 客户端**承担——donkey **不自研 transport**（不包装 `send`、不改 header、不重试）。donkey 在这一层只有一处自研，且**不属网络语义**、只做**环境适配**：构造任何 client 之前清洗代理 env var（§9.4）。
 
-```python
-class NetworkTransport:
-    def __init__(self, timeout: float, max_retries: int):
-        self._client = httpx.AsyncClient(timeout=timeout)
+**观测手段**（证明透传，不参与转发）：`httpx` 的 event hook 抓原始 wire traffic——`harness/demo/about_providers/provider.py` 的 B09 断言即用此法核对"请求体原样发出"。
 
-    async def send(self, request: PreparedRequest) -> Response:
-        """透传：仅做连接管理 + 超时切断。"""
-        return await self._client.send(request)
-```
-
-**禁止**：
+**禁止**（对 donkey 代码的硬约束）：
 
 - ❌ 在 transport 层调用 `json.loads(response.body)`；
 - ❌ 在 transport 层判断 `response.status_code == 429` 重试；
@@ -147,43 +162,31 @@ class NetworkTransport:
 
 ### 2.3 解析层：严谨
 
-**职责**（per provider 一个 class）：
+**语义职责**（每 provider 一套，逐项对应到 LangChain 已实现的类）：
 
-- **请求解析**：`RequestParser.parse(messages, tools, **params) -> bytes` —— 把 LangChain 统一 schema 翻译成 provider 专有 JSON；
-- **响应解析**：`ResponseParser.parse(response: bytes) -> AIMessage` —— 把 provider 专有响应翻译回 LangChain 统一 schema；
-- **流式响应解析**：`StreamParser.parse(chunk: bytes) -> Iterator[AIMessageChunk]` —— 逐 token 翻译；
-- **工具调用解析**：把 LangChain `tool_calls` 翻译成 provider 专有格式（如 OpenAI 的 `tools` 数组、Anthropic 的 `tools` + `tool_choice`）；
-- **usage 解析**：把 provider 专有的 `usage`（OpenAI `prompt_tokens` / Anthropic `input_tokens` / ...）翻译成统一的 `UsageMetadata`（`input_tokens` / `output_tokens` / `total_tokens`）。
+| 解析职责 | 语义 | v1 落点（零自研） |
+|---|---|---|
+| **请求解析** | 把 LangChain 统一 schema 翻译成 provider 专有 JSON | LangChain 各 ChatModel 类（`ChatOpenAI` / `ChatAnthropic` / ...） |
+| **响应解析** | 把 provider 专有响应翻译回 LangChain 统一 schema | 同上 |
+| **流式响应解析** | 逐 chunk 翻译成 `AIMessageChunk` | 同上 |
+| **工具调用解析** | LangChain `tool_calls` ↔ provider 专有工具 schema | 同上 |
+| **usage 解析** | provider 专有 `usage` ↔ 统一 `UsageMetadata` | 同上 |
 
-**严谨要求**：
+**v1 归属**：解析层由 **LangChain 各 provider 包**承担，donkey **不自研任何解析类**（v0 草案里的 `OpenAIRequestParser` / `ResponseParser` / `StreamParser` 全部作废）。donkey 侧只有 1 个抽象基类 `ReusableProvider`（负责"构造 LangChain 类 + 传参"，§15.1）与 1 个 `loader`（负责"读 TOML + 校验"，§15.5）。
+
+**donkey 在解析层做的事**（全部落在"配置层"，不碰报文）：
+
+1. **选对 LangChain 类**——`provider_id` → 类的注册表（§15.4 `PROVIDER_REGISTRY`）；
+2. **把配置严格校验后传进去**——per-provider 严格 schema（F002 load，§7.3 / §11.1）；
+3. **provider 专属字段交给对应 LangChain 类**——如 Anthropic 的 `thinking.budget_tokens`、Ollama 的 `num_ctx`、Bedrock 的 `aws_*`，donkey 只负责"校验 + 转发"，不重新实现语义。
+
+**严谨要求**（配置层）：
 
 - 任何 provider-specific 字段（如 OpenAI `organization`、Anthropic `thinking.budget_tokens`、Ollama `num_ctx`）都**有 schema 定义**（Pydantic Model 或 dataclass）；
-- 字段类型 / 取值范围 / 必填性按 provider 官方文档**强校验**；
+- 字段类型 / 取值范围 / 必填性按 provider 官方文档**强校验**（如 `temperature` 越界、`timeout` 类型错 → exit 11）；
 - **不**接受未在 schema 定义的字段（拒绝写入配置文件 —— F002 load 阶段报错）；
-- 字段拼写错误**立即报错**（不延迟到运行时）。
-
-**示例**（OpenAI 解析层伪代码）：
-
-```python
-# donkey/core/llm/providers/openai.py
-
-class OpenAIRequestParser:
-    """OpenAI Chat Completions API 请求解析器。"""
-
-    def parse(self, messages: list[BaseMessage], tools: list[BaseTool], **params) -> bytes:
-        payload = {
-            "model": params["model_name"],
-            "messages": [_convert_message(m) for m in messages],
-        }
-        if "max_tokens" in params:
-            payload["max_completion_tokens"] = params["max_tokens"]  # o-series
-        if "temperature" in params:
-            payload["temperature"] = params["temperature"]
-        # ... 严谨按 OpenAI 文档每个字段
-        if tools:
-            payload["tools"] = [_convert_tool(t) for t in tools]
-        return json.dumps(payload).encode("utf-8")
-```
+- 字段拼写错误**立即报错**（不延迟到运行时）；
+- **不**开透传口子（不设 `[provider.extra]`，P-5）。
 
 ### 2.4 应用层：抽象
 
@@ -201,7 +204,7 @@ class OpenAIRequestParser:
 from langchain_core.messages import HumanMessage
 from donkey.core.llm.application.facade import get_default_chat_model
 
-model = get_default_chat_model()  # 从 provider.toml 读 default_provider
+model = get_default_chat_model()  # 从 providers/default.toml 读 default_provider
 response = model.invoke([HumanMessage(content="你好")])
 print(response.content)        # 统一接口
 print(response.usage_metadata) # 统一接口
@@ -214,12 +217,13 @@ print(response.usage_metadata) # 统一接口
 
 ### 2.5 三层之间不变量
 
-| 边界 | 入向不变量 | 出向不变量 |
-|---|---|---|
-| **网络层 → 解析层** | bytes 完整（无损） | AIMessage / 错误信息（含 status_code + body 摘要） |
-| **解析层 → 应用层** | 解析后的结构化数据**符合 LangChain schema** | 翻译后的结构化数据**符合 provider 专有 schema**（由 provider 文档保证） |
-| **应用层 → 解析层** | 业务消息 + 工具调用（LangChain schema） | provider-specific JSON / SSE bytes |
-| **解析层 → 网络层** | provider-specific JSON / SSE bytes | HTTP request（method / url / headers / body） |
+| 边界 | 归属 | 入向不变量 | 出向不变量 |
+|---|---|---|---|
+| **网络层 → 解析层** | LangChain 内部 | bytes 完整（无损：不改 body / 不改 header） | provider 专有响应原样上交 |
+| **解析层 → 网络层** | LangChain 内部 | provider 专有 JSON / SSE bytes | HTTP request（method / url / headers / body） |
+| **解析层 → 应用层** | LangChain 内部 | provider 专有响应 | 统一 schema（`AIMessage` / `ToolCall` / `UsageMetadata`） |
+| **应用层 → 解析层** | donkey 边界 | 业务消息 + 工具调用（LangChain schema） | provider 专有请求（由对应 LangChain 类生成） |
+| **配置 → 解析层** | **donkey 唯一自研边界** | 已过 F002 严格校验的 provider 配置（§7.3 / §11.1） | 传给 LangChain 类的构造参数——**不透明转发，不改写语义** |
 
 ---
 
@@ -275,7 +279,7 @@ print(response.usage_metadata) # 统一接口
 | 9 | 字节跳动·豆包 | `doubao` | `ChatOpenAI` + base_url | 闭源 | 豆包 / Seed | 豆包 Vision / 即梦 | 火山引擎方舟（Ark）API |
 | 10 | 月之暗面 Kimi | `kimi` | `ChatOpenAI`（默认）/`ChatMoonshot`（备选） | 闭源+开源 | Kimi K 系列（长上下文 Agent） | Kimi-VL | 推理模型用 ChatMoonshot 保留 reasoning_content |
 | 11 | 智谱 AI Zhipu/Z.ai | `zhipu` | `ChatOpenAI` + base_url | 闭源+开源 | GLM 系列 | GLM-V / CogView | bigmodel.cn，GLM-Z 推理模型受 ChatOpenAI reasoning_content 丢失影响 |
-| 12 | MiniMax | `MiniMax` | **`ChatOpenAI` + base_url** | 闭源 | MiniMax-M3 / M2.7 / M2.5 / M2.1 / M2 系列 | MiniMax-M3 多模态（图视频）| **走 OpenAI 兼容协议**（`api.minimaxi.com/v1`），thinking 以 `<think>` 标签保留在 content；详见 §3.6 |
+| 12 | MiniMax | `minimax` | **`ChatOpenAI` + base_url** | 闭源 | MiniMax-M3 / M2.7 / M2.5 / M2.1 / M2 系列 | MiniMax-M3 多模态（图视频）| **走 OpenAI 兼容协议**（`api.minimaxi.com/v1`），thinking 以 `<think>` 标签保留在 content；详见 §3.6 |
 | 13 | 腾讯 | `tencent` | `ChatOpenAI` + base_url | 闭源 | 混元 Hy 系列 | 混元视觉 / 优图 | 腾讯云 TI 平台 |
 | 14 | 阶跃星辰 StepFun | `stepfun` | `ChatOpenAI` + base_url | 闭源 | Step 系列 | Step 视觉 / 视频 | |
 | 15 | 小米 | `xiaomi` | `ChatOpenRouter` / `ChatOllama` | 开源 | MiMo 系列 | MiMo 全模态 | OpenRouter 调用量曾居首 |
@@ -329,7 +333,7 @@ print(response.usage_metadata) # 统一接口
 | doubao | api_key | `ChatOpenAI` + 自定义 base_url | ⚠️ 轻量 |
 | kimi | api_key | `ChatOpenAI`（默认）；`ChatMoonshot`（thinking 模型） | ⚠️ 轻量 |
 | zhipu | api_key | `ChatOpenAI` + 自定义 base_url | ⚠️ 轻量 |
-| MiniMax | api_key | `ChatOpenAI` + 自定义 base_url（默认 OpenAI 兼容端点 `api.minimaxi.com/v1`，适配 Coding Plan 的 `sk-cp-` 密钥）| ⚠️ 轻量 |
+| minimax | api_key | `ChatOpenAI` + 自定义 base_url（默认 OpenAI 兼容端点 `api.minimaxi.com/v1`，适配 Coding Plan 的 `sk-cp-` 密钥）| ⚠️ 轻量 |
 | tencent | api_key | `ChatOpenAI` + 自定义 base_url | ⚠️ 轻量 |
 | xiaomi | 取决于平台 | `ChatOpenAI` / OpenRouter | ⚠️ 轻量 |
 | stepfun | api_key | `ChatOpenAI` + 自定义 base_url | ⚠️ 轻量 |
@@ -458,6 +462,13 @@ AIMessage(
 2. **thinking 保留**：实测 MiniMax OpenAI-compat 端点默认将 thinking 包裹在 `<think>...</think>` 标签内放回 `content`；`ChatOpenAI` 不解析 `<think>` 标签，标签原样保留 → 应用层可用正则提取。
 3. **TOML 字段最少**：用户只需填 `api_key = "sk-cp-..."` + `api_host = "https://api.minimaxi.com/v1"`（或留空用默认）。
 4. **无需 v1 引入任何社区 / 弃用依赖**。
+
+> **⚠️ 端点特性（实测，流式）**：`stream = true` 时 MiniMax 的 OpenAI 兼容端点返回
+> `"usage": null`（**除非**显式传 `stream_options.include_usage=true`）→ LangChain 侧
+> `usage_metadata = None`，应用层拿不到 token 统计；非流式调用则正常返回 usage。
+> **落地**：解析层在流式下统一传 LangChain 官方参数 `stream_usage=True`
+> （`langchain-openai` / `langchain-deepseek` 均支持，会自动补 `stream_options`），
+> 使跨 provider 的 `usage_metadata` 行为一致。详见 §5.2 usage 行 + §15.2 provider 薄包装示例。
 
 > **实测补充（MiniMax-M3 + `sk-cp-` Coding Plan 密钥）**：
 >
@@ -598,7 +609,7 @@ donkey 内部对 LangChain 异常的处理**遵循"修复动作合并"原则**�
 | **（构造期）`openai.OpenAIError: Missing credentials`** | ❌ | 不重试 | **90** | `ModelAuthenticationError` |
 
 > - **最后一行是实测新增**——`api_key` 缺失或为空串时，底层 SDK 在**构造 ChatModel / client 阶段**就抛 `Missing credentials`（**不是**运行时的 401），因此 §9.2 的"空 api_key → warning"路径终点是**构造期失败**，必须单独映射到 exit 90（详见 §9.1.1 / §9.2）。
-> - 该异常的原始文案包含"or set the `OPENAI_API_KEY` ... environment variable"——**与 §9.1「不读 env var」立场直接冲突**，CLI 层必须**改写文案**（如"api_key 未配置或为空，请检查 provider.toml"），不得把用户引向 env var 路径。
+> - 该异常的原始文案包含"or set the `OPENAI_API_KEY` ... environment variable"——**与 §9.1「不读 env var」立场直接冲突**，CLI 层必须**改写文案**（如"api_key 未配置或为空，请检查 providers/<provider_id>.toml"），不得把用户引向 env var 路径。
 > - **`ModelInvalidRequestError`(400) 的 exit code 统一为 83**——代码片段与 §16 / §17 均按表格口径（最具体的一处）对齐。
 
 **奥卡姆合并逻辑**：
@@ -748,14 +759,16 @@ POST https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completio
 
 ### 5.2 关键差异点
 
-| 差异点 | 体现 | 解析层影响 |
+| 差异点 | 体现 | 解析层要求（LangChain 已实现，donkey 复用） |
 |---|---|---|
 | **`system` 消息位置** | OpenAI / Kimi / Doubao：放 `messages` 首条；Anthropic / Gemini / ERNIE：单独字段 | 解析层需重写 system message 位置 |
 | **`max_tokens` 命名** | langchain-openai 1.7.2 的 `ChatOpenAI` 对**所有**模型都把 `max_tokens` 重命名为 `max_completion_tokens`（源码 `base.py:3830` / `:3845`），**不只** o-series；而基于 `BaseChatOpenAI` 的专用类（`ChatDeepSeek` 等）仍下发 `max_tokens`；Anthropic / Gemini / Ollama：`max_tokens` | 解析层按模型版本分派 |
 | **鉴权位置** | 大多数：`Authorization: Bearer` header；ERNIE：URL query `access_token`；iFlytek：URL query + 签名 | 解析层需 provider-specific auth builder |
 | **流式响应格式** | OpenAI / 兼容：SSE `data: {...}\n\n`；Anthropic：SSE `event: ...` 6 种事件；Gemini：SSE `data: {...}\n\n`（字段不同） | 解析层需 provider-specific SSE parser |
 | **工具调用 schema** | OpenAI / 兼容：`tools[].function`；Anthropic：`tools[].input_schema`；Gemini：`tools[].function_declarations` | 解析层按 provider 重写工具 schema |
-| **usage 字段** | OpenAI：`prompt_tokens` / `completion_tokens`；Anthropic：`input_tokens` / `output_tokens`；Gemini：`promptTokenCount` / `candidatesTokenCount`；Ollama：`prompt_eval_count` / `eval_count` | 解析层统一翻译为 LangChain `UsageMetadata` |
+| **usage 字段** | OpenAI：`prompt_tokens` / `completion_tokens`；Anthropic：`input_tokens` / `output_tokens`；Gemini：`promptTokenCount` / `candidatesTokenCount`；Ollama：`prompt_eval_count` / `eval_count` | 解析层统一翻译为 LangChain `UsageMetadata`。**⚠️ 流式差异（实测）**：`stream = true` 时各端点行为不一致——**MiniMax 的 OpenAI 兼容端点返回 `"usage": null`**（除非显式传 `stream_options.include_usage=true`）→ `usage_metadata = None`；DeepSeek 端点默认带 usage。**落地**：解析层在流式下统一传 LangChain 官方参数 `stream_usage=True`（`langchain-openai` / `langchain-deepseek` 均支持，会自动补 `stream_options`），保证跨 provider 的 `usage_metadata` 行为一致 |
+
+> **v1 归属说明**：本表第三列描述的是**provider 格式差异对解析层提出的要求**，不是"donkey 要写这些代码"——这些要求 LangChain 各 provider 包已全部实现，donkey 直接复用（v1 零自研，见 §2.3 / §15.1）。本表的作用是**回答"为什么推理模型必须用专用类、不能走 `ChatOpenAI + base_url`"**（见 §5.3 关键警告）。
 
 ### 5.3 解析层落地的代码结构
 
@@ -771,37 +784,39 @@ POST https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completio
 donkey/core/llm/
 ├── providers/
 │   ├── base.py                       # ReusableProvider 抽象基类（v1 仅此一个抽象）
-│   ├── openai.py                     # ChatOpenAI
-│   ├── anthropic.py                  # ChatAnthropic
-│   ├── google.py                     # ChatGoogleGenerativeAI
-│   ├── ollama.py                     # ChatOllama
-│   ├── xai.py                        # ChatXAI
-│   ├── mistral.py                    # ChatMistralAI
-│   ├── bedrock.py                    # ChatBedrock
-│   ├── groq.py                       # ChatGroq
-│   ├── fireworks.py                  # ChatFireworks
-│   ├── together.py                   # ChatTogether
-│   ├── cohere.py                     # ChatCohere
-│   ├── perplexity.py                 # ChatPerplexity
-│   ├── databricks.py                 # ChatDatabricks
-│   ├── cerebras.py                   # ChatCerebras
-│   ├── deepseek.py                   # ⚠️ ChatDeepSeek（专用类，保留 reasoning_content）
-│   ├── qwen.py                       # 默认 ChatOpenAI + base_url；可选 ChatQwen 保留 thinking
-│   ├── moonshot.py                   # 默认 ChatOpenAI + base_url；可选 ChatMoonshot 保留 thinking
-│   ├── openrouter.py                 # ⚠️ ChatOpenRouter（专用类，统一路由）
-│   ├── doubao.py                     # ChatOpenAI + base_url
-│   ├── zhipu.py                      # ChatOpenAI + base_url
-│   ├── MiniMax.py                    # ChatOpenAI + base_url（OpenAI 兼容 + sk-cp- 密钥；详见 §3.6）
-│   ├── tencent.py                    # ChatOpenAI + base_url
-│   ├── stepfun.py                    # ChatOpenAI + base_url
-│   ├── xiaomi.py                     # 多平台路由（OpenRouter / Ollama）
-│   ├── meta.py                       # 多平台路由（Ollama / OpenAI 兼容代理）
-│   ├── openai_compatible.py          # ChatOpenAI + 必填 base_url
-│   └── _v1_scope.py                  # v1 范围守卫：白名单外 / v2+ 候选 / 永久黑名单 / 暂不支持清单 校验（v1 范围内该模块下两个 dict 当前均为空集合，仅承载治理流程）
+│   ├── __init__.py                   # PROVIDER_REGISTRY + get_provider()（§15.4）
+│   ├── _v1_scope.py                  # v1 范围守卫：白名单外 / v2+ 候选 / 永久黑名单 / 暂不支持清单 校验（v1 范围内该模块下两个 dict 当前均为空集合，仅承载治理流程）
+│   └── reusable/                     # 26 个 provider 的薄包装（只构造 LangChain 类，不写解析逻辑）
+│       ├── openai.py                 # ChatOpenAI
+│       ├── anthropic.py              # ChatAnthropic
+│       ├── google.py                 # ChatGoogleGenerativeAI
+│       ├── ollama.py                 # ChatOllama
+│       ├── xai.py                    # ChatXAI
+│       ├── mistral.py                # ChatMistralAI
+│       ├── bedrock.py                # ChatBedrock
+│       ├── groq.py                   # ChatGroq
+│       ├── fireworks.py              # ChatFireworks
+│       ├── together.py               # ChatTogether
+│       ├── cohere.py                 # ChatCohere
+│       ├── perplexity.py             # ChatPerplexity
+│       ├── databricks.py             # ChatDatabricks
+│       ├── cerebras.py               # ChatCerebras
+│       ├── deepseek.py               # ⚠️ ChatDeepSeek（专用类，保留 reasoning_content）
+│       ├── qwen.py                   # 默认 ChatOpenAI + base_url；可选 ChatQwen 保留 thinking
+│       ├── moonshot.py               # 默认 ChatOpenAI + base_url；可选 ChatMoonshot 保留 thinking（kimi）
+│       ├── openrouter.py             # ⚠️ ChatOpenRouter（专用类，统一路由）
+│       ├── doubao.py                 # ChatOpenAI + base_url
+│       ├── zhipu.py                  # ChatOpenAI + base_url
+│       ├── minimax.py                # ChatOpenAI + base_url（OpenAI 兼容 + sk-cp- 密钥；详见 §3.6）
+│       ├── tencent.py                # ChatOpenAI + base_url
+│       ├── stepfun.py                # ChatOpenAI + base_url
+│       ├── xiaomi.py                 # 多平台路由（OpenRouter / Ollama）
+│       ├── meta.py                   # 多平台路由（Ollama / OpenAI 兼容代理）
+│       └── openai_compatible.py      # ChatOpenAI + 必填 base_url
 ├── network/
-│   └── transport.py                  # 透传 HTTP（§2.2）
+│   └── env_sanitize.py               # 网络层唯一自研点：代理 env 防御性清洗（§9.4）——不实现 transport
 ├── schema/
-│   └── loader.py                     # TOML → Pydantic dataclass（按 provider 分派）
+│   └── loader.py                     # providers/ 目录扫描 → Pydantic dataclass（按 provider 分派 + enabled 惰性）
 └── application/
     └── facade.py                     # 高级抽象：get_default_chat_model() 等
 ```
@@ -816,77 +831,8 @@ donkey/core/llm/
 
 **轻量 provider 复用方式**（直接调 LangChain，不实现解析方法）：
 
-```python
-# donkey/core/llm/providers/reusable/qwen.py
-from donkey.core.llm.providers.base import ReusableProvider
-from langchain_openai import ChatOpenAI
-
-
-class QwenProvider(ReusableProvider):
-    """通义千问：默认走 ChatOpenAI + base_url。"""
-
-    provider_id = "qwen"
-    default_api_host = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-
-    def build_chat_model(self, model: str, **params) -> ChatOpenAI:
-        """直接构造 LangChain ChatOpenAI，零解析。"""
-        return ChatOpenAI(
-            model=model,
-            api_key=params["api_key"],
-            base_url=params.get("api_host") or self.default_api_host,
-            temperature=params.get("temperature"),
-            max_tokens=params.get("max_tokens"),
-            timeout=params.get("timeout", 60),
-            max_retries=params.get("max_retries", 6),
-            # reasoning_content 通过 ChatOpenAI 会被丢弃（参见 §3.2 关键警告）；
-            # 推理模型按 model_name 后缀分派到 QwenThinkingProvider / ChatQwQ 类
-        )
-
-
-class QwenThinkingProvider(ReusableProvider):
-    """通义千问 QwQ 推理模型专用：走 ChatQwQ 保留 reasoning_content。
-
-    两个类都是 langchain_qwq 提供，区别见源码 langchain_qwq/chat_models.py:32 / :694。
-    """
-
-    provider_id = "qwen"  # 同 provider_id
-    default_api_host = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    preferred_for_thinking = True
-
-    def build_chat_model(self, model: str, **params):
-        from langchain_qwq import ChatQwQ
-
-        return ChatQwQ(
-            model=model,
-            api_key=params["api_key"],
-            # ChatQwQ 总是 thinking on，无需额外字段
-            temperature=params.get("temperature"),
-            max_tokens=params.get("max_tokens"),
-            timeout=params.get("timeout", 60),
-            max_retries=params.get("max_retries", 6),
-        )
-
-
-# 应用层选择逻辑：
-# def select_qwen_provider(model_name: str) -> ReusableProvider:
-#     """根据 model_name 后缀分派 Qwen Provider 类。
-#
-#     规则：
-#     - model_name 包含 `qwq` / `reasoner` 或以 `-thinking` 结尾
-#       → QwenThinkingProvider（走 ChatQwQ，thinking 强制开启）
-#     - 其它通用 Qwen 模型（qwen3-max / qwen3-72b / qwen-plus 等）
-#       → QwenGeneralThinkingProvider（走 ChatQwen + enable_thinking=True）
-#     """
-#     lowered = model_name.lower()
-#     thinking_keywords = ("qwq", "reasoner")
-#     if any(kw in lowered for kw in thinking_keywords) or lowered.endswith("-thinking"):
-#         return QwenThinkingProvider()
-#     return QwenGeneralThinkingProvider()
-#
-# # 调用：
-# provider = select_qwen_provider(model)
-# chat_model = provider.build_chat_model(model, **params)
-```
+> 抽象基类 `ReusableProvider` 见 **§15.1**；完整示例（`openai.py` / `qwen.py` / `deepseek.py` / `minimax.py`，含 `select_qwen_provider` 的 model_name 分派逻辑）见 **§15.2**。
+> **本节不重复贴代码**——provider 复用代码只有一份定义（§15），避免两处漂移。
 
 ---
 
@@ -894,14 +840,14 @@ class QwenThinkingProvider(ReusableProvider):
 
 | # | 目标 | 度量 |
 |---|---|---|
-| **G-1** | 配置文件 = Cherry Studio 风格：每个 provider 一个独立 schema | TOML 顶层有 `[openai]` / `[anthropic]` / ... 而非统一 `[provider]` |
+| **G-1** | 配置文件 = Cherry Studio 风格：每个 provider 一个独立 schema **+ 独立文件** | `providers/` 目录下有 `openai.toml` / `anthropic.toml` / ... 而非统一 `[provider]` 表 + 单一 `provider.toml` |
 | **G-2** | 用户填写最少字段即可跑通 | 必填字段 ≤ 2 个（`api_key` + `default_provider.default_model`） |
 | **G-3** | workspace 跨 OS 行为一致 | `api_key` 走 TOML 明文，不读环境变量 |
 | **G-4** | 解析严谨 | 字段拼写错误在 F002 load 阶段就报错，不延迟到运行时 |
 | **G-5** | 透传网络 | 解析层不直接发 HTTP；网络层不解析 body |
 | **G-6** | 高级抽象 | 业务代码只调用 `model.invoke(messages)`，不感知 provider |
 | **G-7** | schema 演进受控 | provider 白名单 + §3.0 治理原则硬限；新 provider 走 §14 流程；列入永久黑名单必须满足硬理由条件 |
-| **G-8** | Web UI 友好 | 每个 provider 渲染为独立 form section，含协议默认提示 |
+| **G-8** | Web UI 友好 | 每个 provider 渲染为独立 form section（一 tab = 一文件），含协议默认提示 + `enabled` 开关 |
 | **G-9** | v1 100% 可用 LangChain 实现 | **v1 零自研**：26/26 v1 provider 复用 LangChain 官方类（14 独立类 + 6 薄包装 + 3 推理专用 + 3 本地/元）；v2+ 候选 3 家（baidu / iflytek / sensetime）推迟自研，见 §14.6 |
 
 ---
@@ -910,64 +856,137 @@ class QwenThinkingProvider(ReusableProvider):
 
 ### 7.1 文件路径与命名
 
-- **路径**：`<workspace>/provider.toml`（**强制** root 目录，与 `instruction.md` / `README.md` 同级）；
-- **编码**：UTF-8 无 BOM；
-- **格式**：TOML 1.0（Python 3.11+ `tomllib` 解析）；
-- **大小**：典型 workspace 30–80 行（**26** 个 provider 节，每节 3–5 行 + 注释）。
-  > 实测：§3.1 表格 26 行；`langchain.chat_models.base._BUILTIN_PROVIDERS` 实测 30 个。
+> **v1 布局 = `providers/` 目录，一 provider 一文件**（取代 v0 草案的"单文件 `provider.toml` + 26 个 provider 节"）。
+
+**目录路径**：`<workspace>/providers/`（**强制**目录，与 `instruction.md` / `README.md` 同级）。
+
+**目录内容**：
+
+| 路径 | 角色 | 必填 | 说明 |
+|---|---|---|---|
+| `providers/default.toml` | **全局默认**（保留名） | ✅ | 只含 `default_provider` + `default_model` 两个字段；`default` 是**保留文件名**，不可用作 provider_id |
+| `providers/<provider_id>.toml` | **单个 provider 的配置** | ❌（按需创建） | 文件 stem **必须逐字符等于 provider_id**（§7.1 命名规则） |
+| `providers/README.md` | 目录快照（`donkey init` 生成） | ❌ | 列出 v1 白名单 26 家（一句话说明 + 如何启用）；**非 TOML，不参与解析** |
+
+**命名规则（硬约束）**：
+
+1. **stem == provider_id，逐字符、大小写敏感**——`providers/openai.toml` ✅；`providers/OpenAI.toml` ❌（大小写不一致 → `ProviderTomlScopeError`）；
+2. **provider_id 规范化为小写 kebab-case**（v1 白名单 26 家的唯一 id 形态）——`minimax` / `openai-compatible` / `databricks` …；
+   > ⚠️ **为什么强制小写**：macOS / Windows 的大小写不敏感文件系统上，`MiniMax.toml` 与 `minimax.toml` 会撞名 / 歧义；provider_id 一旦进入**文件名**就必须消除大小写歧义。模型名（`MiniMax-M3`）保持厂商原样，不受此约束。
+3. **未知 stem → `ProviderTomlScopeError`（exit 11）**——拼错文件名（`providers/openai2.toml`）在 load 阶段即被抓到，不延迟到运行时；
+4. **保留名**：`default`（全局默认文件）——白名单内无同名 provider，无歧义；
+5. **忽略项**：非 `.toml` 文件（`README.md` 等）、`.` / `..`、以 `.` 开头的隐藏文件——**不报错、不解析**；
+6. **编码**：UTF-8 无 BOM；**格式**：TOML 1.0（Python 3.11+ `tomllib` 解析）。
+
+**大小**：单个 provider 文件 10–40 行（含注释）；`donkey init` 产物 = 26 个 stub + `default.toml` + `README.md`，约 30–60 KB。
+> 实测：§3.1 表格 26 行；`langchain.chat_models.base._BUILTIN_PROVIDERS` 实测 30 个。
+
+**「占位符 hack」的废除**（v0 草案遗留的 `api_key = "REPLACE_ME"`）：
+
+| 维度 | v0 草案（单文件 `provider.toml`） | **v1（`providers/` 目录）** |
+|---|---|---|
+| 出厂模板里未配置的 provider | 26 个节全填 `REPLACE_ME` 占位符，**只为骗过静态检查** | 26 个 stub 全部 `enabled = false`，**天然惰性**，不需要占位符 |
+| 用户填错 key | 占位符未替换 → 静态过、**动态 exit 15** 才暴露 | 启用后空 `api_key` → **静态 exit 11**（C 档），更早更准 |
+| 用户只想用 1 家 | 必须读 800 行大文件 | 编辑 2 个小文件（`providers/<id>.toml` + `providers/default.toml`） |
 
 ### 7.2 全局结构
 
-```toml
-# 顶层：全局默认 + 26 个 provider 独立节
-default_provider = "openai"          # 默认 provider_id
-default_model = "gpt-4o"             # 默认 model_id（在 default_provider 下）
+**目录树**（`donkey init` 产物形态）：
 
-[openai]
-# OpenAI 专属字段（8-12 通用 + 2-3 专属）
-
-[anthropic]
-# Anthropic 专属字段
-
-# ... 26 个 provider 节（v1 白名单）
-
-# 不在 §3.1 白名单或 §3.5 v2+ 候选的 provider 节（如 [foo_ai]）→ F002 load 报错（exit 11）
 ```
+<workspace>/
+├── instruction.md
+├── providers/                      # 必填目录。一 provider 一文件
+│   ├── default.toml                # 必填。全局默认（default_provider + default_model）
+│   ├── README.md                   # 目录快照（26 家白名单）
+│   ├── openai.toml                 # stub：enabled = false
+│   ├── anthropic.toml
+│   ├── google.toml
+│   └── ... 共 26 个 provider stub
+├── manifest.json
+├── tools/  mcp/  skills/  memory/
+```
+
+**`providers/default.toml`**：
+
+```toml
+# 全局默认：这个 workspace 默认用哪个 provider 的哪个 model
+default_provider = "openai"          # ← 必须指向 enabled = true 的 provider 文件
+default_model = "gpt-4o"             # ← 必须存在于该 provider 文件的 [models] 表
+```
+
+**`providers/openai.toml`**：
+
+```toml
+# providers/openai.toml —— OpenAI（含 o 系列推理模型）
+enabled = true                      # 开关：缺省 true；false = 完全惰性
+api_key = "sk-..."                  # TOML 明文，绝不读环境变量（不读 env var）
+api_host = ""                       # 选填
+timeout = 60
+max_retries = 6
+temperature = 1.0
+max_tokens = 16384
+
+[models.gpt-4o]                     # provider 作用域已由文件名确定，models 表直接挂在文件顶层
+temperature = 1.0
+```
+
+**加载顺序（F002 load）**：
+
+1. 扫描 `providers/*.toml` → 解析 `default.toml`（全局）；
+2. 逐个解析 provider 文件 → **stem 必须命中白名单**（否则 scope error）；
+3. `enabled = false` 的文件 → **整份惰性**（不校验字段、不要求 `api_key`、不参与连通性检查）；
+4. `enabled = true`（或缺省）的文件 → 走 per-provider 严格 schema 校验（§7.3）；
+5. 校验 `default_provider` / `default_model` 的跨文件一致性（§7.3）。
 
 ### 7.3 schema 强制约束（F002 load 校验）
 
-> exit 11 严格归 `ProviderTomlLoadError` **伞形 Error class**——本节所有"`provider.toml` 加载相关"失败都抛该伞形类的具体子类型，最终 CLI 层映射同一 exit 11（详见 `harness/features/README.md §3.2 + §3.2.1`）。
+> exit 11 严格归 `ProviderTomlLoadError` **伞形 Error class**——本节所有"`providers/` 目录加载相关"失败都抛该伞形类的具体子类型，最终 CLI 层映射同一 exit 11（详见 `harness/features/README.md §3.2 + §3.2.1`）。
+>
+> ⚠️ **错误消息必须携带文件路径**（如 `providers/openai.toml: temperature 越界`）——多文件布局下"是哪个文件错了"是用户修复的第一步。
 
 | 约束 | F002 load 行为 | 子类 Exception |
 |---|---|---|
-| TOML 语法错误（`tomllib.TOMLDecodeError`） | **exit 11** | `ProviderTomlSyntaxError` |
-| 顶层 `default_provider` 缺失 | exit 11 | `ProviderTomlFieldError` |
-| 顶层 `default_model` 缺失 | exit 11 | `ProviderTomlFieldError` |
-| `default_provider` 不在白名单（§3.1） | exit 11 | `ProviderTomlScopeError` |
-| `default_provider` 在永久黑名单（v1 空集合，详见 §13.4） | exit 11 | `ProviderTomlScopeError` |
-| `default_provider` 在暂不支持清单（v1 空集合，详见 §14.7） | exit 11 | `ProviderTomlScopeError` |
-| `default_provider` 在 §3.5 v2+ 候选 | exit 11 | `ProviderTomlScopeError`（推迟到 v2+ 自研实现） |
-| `[<未列入 §3.1 或 §3.5 的 provider>]` 任何节 | exit 11 | `ProviderTomlScopeError` |
-| provider 节内字段拼写错误（如 `temprature`） | exit 11 | `ProviderTomlFieldError` |
-| provider 节内字段值类型错（如 `temperature = "abc"`） | exit 11 | `ProviderTomlFieldTypeError` |
-| 字段值**硬越界**（如 `temperature = 3.0`、`api_host` 非 URL 格式） | exit 11 | `ProviderTomlFieldValueError` |
-| `default_model` 不在该 provider 的 `models` 列表 | exit 11 | `ProviderTomlMissingModelError` |
-| provider 类的 langchain 不允许 `api_host` 覆盖（如 Bedrock via Converse） | exit 11 | `ProviderTomlHostNotAllowedError` |
-| **字段值软越界**（如 `temperature > 1.5` 不超规但偏高）| **warning**（exit 0） | — |
-| 鉴权缺失（`api_key` 为空）——**C 档云端 provider**（21 个） | **exit 11**（`ProviderTomlFieldError`） | — |
-| 鉴权缺失（`api_key` 为空）——**B 档**（`openai-compatible` / `xiaomi`） | **warning**（exit 0） | — |
-| 鉴权缺失（`api_key` 为空）——**A 档本地 provider**（`ollama` / `meta`） | 无（合法，不出 warning） | — |
-| `bedrock` 凭据缺失（`aws_secret_access_key` 等为空） | **exit 11**（`ProviderTomlFieldError`）——`[bedrock]` 不用 `api_key`，改查 4 个 `aws_*` 字段 | — |
+| `providers/` 目录不存在 | **exit 11** | `ProviderTomlFieldError` |
+| `providers/default.toml` 不存在 | **exit 11** | `ProviderTomlFieldError` |
+| 任一 `.toml` 文件 TOML 语法错误（`tomllib.TOMLDecodeError`） | **exit 11** | `ProviderTomlSyntaxError` |
+| `default_provider` 缺失 / 为空串 | **exit 11** | `ProviderTomlFieldError` |
+| `default_model` 缺失 / 为空串 | **exit 11** | `ProviderTomlFieldError` |
+| `default_provider` 不在白名单（§3.1） | **exit 11** | `ProviderTomlScopeError` |
+| `default_provider` 在永久黑名单（v1 空集合，详见 §13.4） | **exit 11** | `ProviderTomlScopeError` |
+| `default_provider` 在暂不支持清单（v1 空集合，详见 §14.7） | **exit 11** | `ProviderTomlScopeError` |
+| `default_provider` 在 §3.5 v2+ 候选 | **exit 11** | `ProviderTomlScopeError`（推迟到 v2+ 自研实现） |
+| **provider 文件名 stem 未知**（不在 §3.1 / §3.5，如 `providers/openai2.toml`） | **exit 11** | `ProviderTomlScopeError` |
+| `default_provider` 指向的 provider 文件**不存在** | **exit 11** | `ProviderTomlFieldError` |
+| `default_provider` 指向的 provider 文件 **`enabled = false`** | **exit 11** | `ProviderTomlFieldError`（禁用态不能当默认） |
+| `default_model` 不在 default provider 的 `[models]` 表 | **exit 11** | `ProviderTomlMissingModelError` |
+| **零 enabled provider**（`providers/` 下没有任何 `enabled = true` 的文件） | **exit 11** | `ProviderTomlFieldError` |
+| `enabled` 字段类型错（如 `enabled = "yes"`） | **exit 11** | `ProviderTomlFieldTypeError` |
+| provider 文件内字段拼写错误（如 `temprature`，**enabled 文件**） | **exit 11** | `ProviderTomlFieldError` |
+| provider 文件内字段值类型错（如 `temperature = "abc"`，**enabled 文件**） | **exit 11** | `ProviderTomlFieldTypeError` |
+| 字段值**硬越界**（如 `temperature = 3.0`、`api_host` 非 URL 格式，**enabled 文件**） | **exit 11** | `ProviderTomlFieldValueError` |
+| provider 类的 langchain 不允许 `api_host` 覆盖（如 Bedrock via Converse） | **exit 11** | `ProviderTomlHostNotAllowedError` |
+| 鉴权缺失（`api_key` 为空）——**C 档云端 provider**（21 个，**enabled 文件**） | **exit 11** | `ProviderTomlFieldError` |
+| 鉴权缺失（`api_key` 为空）——**B 档**（`openai-compatible` / `xiaomi`，**enabled 文件**） | **warning**（exit 0） | — |
+| 鉴权缺失（`api_key` 为空）——**A 档本地 provider**（`ollama` / `meta`，**enabled 文件**） | 无（合法，不出 warning） | — |
+| `bedrock` 凭据缺失（`aws_secret_access_key` 等为空，**enabled 文件**） | **exit 11** | `ProviderTomlFieldError`——`bedrock` 不用 `api_key`，改查 4 个 `aws_*` 字段 | — |
+| **字段值软越界**（如 `temperature > 1.5` 不超规但偏高，**enabled 文件**） | **warning**（exit 0） | — |
+| **disabled 文件内的任何字段错误**（拼写 / 类型 / 越界 / 鉴权缺失） | **不校验（完全惰性）** | — |
 
+> - **`enabled` 的缺省值 = `true`**：文件存在即视为"用户要配置这个 provider"；要停用必须显式写 `enabled = false`。最少的意外（少写一行不至于静默失效）。
+> - **disabled 文件的惰性边界**：**只**保留"文件名 stem 是否为已知 provider_id"这一条 scope 校验（防拼错文件名）；其余字段校验、鉴权校验、连通性检查**全部跳过**。理由：用户"先写好配置、暂时不启用"是常见工作流，惰性化让"暂存"不产生阻塞。
+> - **零 enabled = exit 11（硬错，不是 warning）**：v0 草案里"用户还没配置"由 `REPLACE_ME` 占位符兜底；v1 用开关替代占位符后，"启用哪个 provider"是**必须由用户决策**的问题（哪个 provider 当默认、用哪个 model）→ 归入"用户必须决策的硬问题"（§11.2 奥卡姆原则）→ error，exit 11。
+>   > 副作用（已知并接受）：`donkey init` 产物**不再** 100% 通过 F002 静态检查（v0 的 AC-1 静态口径随之修订，见 `harness/features/立项书.md §3.2.3`）；错误消息承担"配置教程"职责——必须写清三步：① 改 `providers/<id>.toml` 的 `enabled = true` → ② 填 `api_key` → ③ 在 `providers/default.toml` 设 `default_provider` / `default_model`。
 > - **temperature 的软 / 硬边界**：硬边界 = `[0.0, 2.0]`（OpenAI 协议硬限，越界 = **error** / exit 11）；软边界 = `> 1.5`（协议允许但偏高 = **warning** / exit 0）。
 > - **`api_host` 不可覆盖的 provider**：v1 首批 = `bedrock`（走 `boto3.Session` / Converse，端点由 AWS region 决定）→ 填了 `api_host` 抛 `ProviderTomlHostNotAllowedError`（exit 11）。清单随 provider 扩充维护。
-> - **`api_key` 分档（3 档 + 1 例外）**：A 档无鉴权本地（`ollama` / `meta`）空值合法无 warning；B 档端点属性未知（`openai-compatible` / `xiaomi`）空值合法 + warning + 占位符；C 档云端（21 家）空值 = **硬错 exit 11**；`bedrock` 不用 `api_key` 字段，改查 4 个 `aws_*` 字段（详见 §9.2 分档表）。
+> - **`api_key` 分档（3 档 + 1 例外）**：A 档无鉴权本地（`ollama` / `meta`）空值合法无 warning；B 档端点属性未知（`openai-compatible` / `xiaomi`）空值合法 + warning + 占位符；C 档云端（21 家）空值 = **硬错 exit 11**；`bedrock` 不用 `api_key` 字段，改查 4 个 `aws_*` 字段（详见 §9.2 分档表）。**三档判定只对 enabled 文件生效。**
 > - **`api_key` 缺失 = warning 的终点不是运行时 401**：实测空 `api_key` 会在**构造 ChatModel 阶段**失败（见 §9.1.1 / §9.2）——warning 仍然成立（不阻塞 load），但运行时会落到 exit 90 的构造期鉴权错误。
+> - **同一 provider 只能有一份配置**（文件名唯一）→ v1 **不支持**同一 provider 的多实例（Cherry Studio 允许"OpenAI 公司版 / 个人版"并存）——列入 v2 议题（届时需引入别名规则，如 `providers/<id>__<alias>.toml`）。
 
 **伞形类层级**（继承 `DonkeyError`）：
 ```python
 class ProviderTomlLoadError(DonkeyError):
-    """exit code: 11（伞形）—— provider.toml 加载阶段任何失败。"""
+    """exit code: 11（伞形）—— providers/ 目录加载阶段任何失败。"""
 
 class ProviderTomlSyntaxError(ProviderTomlLoadError):
     """tomllib.TOMLDecodeError 包装（exit 11）。"""
@@ -992,7 +1011,7 @@ class ProviderTomlScopeError(ProviderTomlLoadError):
     """
 
 class ProviderTomlMissingModelError(ProviderTomlLoadError):
-    """default_model 不在该 provider 的 models 列表（exit 11）。"""
+    """default_model 不在该 provider 文件的 [models] 表中（exit 11）。"""
 
 class ProviderTomlHostNotAllowedError(ProviderTomlLoadError):
     """provider 类的 langchain 不允许 api_host 覆盖（exit 11）。"""
@@ -1001,7 +1020,7 @@ class ProviderTomlHostNotAllowedError(ProviderTomlLoadError):
 **约束**：
 - 所有子类抛错时，CLI 层 `compute_exit_code()` 优先匹配伞形类（`ProviderTomlLoadError`），映射 exit 11；
 - **warning 路径不触发此伞形**——软越界 / B 档（`openai-compatible` / `xiaomi`）的空 `api_key` 打印 warning 后退出 0；**C 档云端 provider 的空 `api_key` 则是硬错（exit 11）**——见 §9.2 分档表；
-- 用户修复动作都是"打开 `provider.toml` 检查 + 重试 `donkey load`"——奥卡姆合并为单一 exit code；
+- 用户修复动作都是"打开 `providers/` 目录检查 + 重试 `donkey load`"——奥卡姆合并为单一 exit code；
 - 子类在 traceback 中**仍可区分**（每个子类的 docstring 标注具体触发），便于日志排查；
 - **`mcp.json` / `SKILL.md` 加载错误不属于 exit 11**——分别对应 exit 12 (`McpJsonSyntaxError`) / exit 13 (`SkillFrontmatterError`)，详见 README §3.2。
 
@@ -1013,15 +1032,16 @@ class ProviderTomlHostNotAllowedError(ProviderTomlLoadError):
 
 ## 8. 推荐方案：每个 provider 独立 schema
 
-### 8.1 通用 8–12 字段（所有 provider 共享）
+### 8.1 通用 9–13 字段（所有 provider 共享）
 
-> 注：以下字段**在每个 provider 节下都重复声明**（P-1 "per-provider 独立 schema"），但每个字段的取值范围 / 默认值按 provider 文档**强校验**。
+> 注：以下字段**在每个 provider 的独立文件里声明**（P-1 "per-provider 独立 schema + 独立文件"，P-6），但每个字段的取值范围 / 默认值按 provider 文档**强校验**。
 
 | # | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
+| 0 | `enabled` | `bool` | ❌（**缺省 `true`**） | **per-provider 开关**：`false` = 该文件**完全惰性**（不校验字段、不要求 `api_key`、不参与连通性检查）；`true` / 缺省 = 正常加载。详见 §7.3 |
 | 1 | `api_key` | `str` | ⚠️ **按 §9.2 三档 + bedrock 例外**：C 档云端（21 家）必填；B 档（`openai-compatible` / `xiaomi`）空值合法 + warning；A 档（`ollama` / `meta`）空值合法；`bedrock` 不用本字段 | provider 鉴权密钥（明文） |
 | 2 | `api_host` | `str` (URL) | ❌（`openai-compatible` / `meta` / `databricks` 必填） | 自定义 API 端点（v1 称 `base_url`；本项目用 `api_host` 与 Cherry Studio 对齐） |
-| 3 | `models` | `table`（子表） | ✅ | 该 provider 下注册的 model 列表；每个 model 是一个子节 `[provider.models.model_id]` |
+| 3 | `models` | `table`（子表） | ✅ | 该 provider 下注册的 model 列表；每个 model 是一个子节 `[models.model_id]`（**provider 作用域已由文件名确定**，不再嵌套 `[<provider>.models.*]`） |
 | 4 | `timeout` | `float` | ❌ | 请求超时（秒），默认 60 |
 | 5 | `max_retries` | `int` | ❌ | 重试次数，默认 6（LangChain 全局） |
 | 6 | `temperature` | `float` | ❌ | 全 provider 默认值（用户可按 model 覆盖） |
@@ -1031,75 +1051,82 @@ class ProviderTomlHostNotAllowedError(ProviderTomlLoadError):
 | 10 | `stream` | `bool` | ❌ | 流式开关，默认 true |
 
 > **注 1**：`api_host` 必填性详见 §10.1（3 家必填 / 23 家选填）。
-> **注 2**：`[bedrock]` **不使用** `api_key`，改用 `aws_access_key_id` / `aws_secret_access_key` / `aws_region` / `aws_session_token` 四个独立字段（§9.1.1 强约束 4）。
-> **注 3**：各 provider 的**专属字段**（如 `[anthropic].thinking` / `[google].thinking_config` / `[bedrock].aws_*`）不在本表——详见 §8.3 全局模板与 §7.3 校验规则。
+> **注 2**：`bedrock` **不使用** `api_key`，改用 `aws_access_key_id` / `aws_secret_access_key` / `aws_region` / `aws_session_token` 四个独立字段（§9.1.1 强约束 4）。
+> **注 3**：各 provider 的**专属字段**（如 `providers/anthropic.toml` 的 `[thinking]` / `providers/google.toml` 的 `[thinking_config]` / `providers/bedrock.toml` 的 `aws_*`）不在本表——详见 §8.3 目录模板与 §7.3 校验规则。
+> **注 4**：字段 0 `enabled` 是 **v1 新增**——它把"provider 配置"从"静态声明"变成"可开关的运行期配置"，与 Cherry Studio 的 per-provider toggle 对齐（§1.4）。
 
 ### 8.2 鉴权占位说明
 
-> 字段 1 `api_key` 在绝大多数 provider 节中**存在且结构统一**，但**取值语义按 provider 而异**：
+> 字段 1 `api_key` 在绝大多数 provider 文件中**存在且结构统一**，但**取值语义按 provider 而异**：
 >
-> - openai / anthropic / google / xai / mistral / qwen / deepseek / doubao / kimi / zhipu / MiniMax / tencent / stepfun / groq / fireworks / together / cohere / perplexity / cerebras / openrouter / databricks：API key 字符串（databricks 为 Personal Access Token 字符串）；
+> - openai / anthropic / google / xai / mistral / qwen / deepseek / doubao / kimi / zhipu / minimax / tencent / stepfun / groq / fireworks / together / cohere / perplexity / cerebras / openrouter / databricks：API key 字符串（databricks 为 Personal Access Token 字符串）；
 > - ollama：一般为空字符串（`""`，Ollama 默认无鉴权）；
 > - meta：取决于平台（自托管=空；第三方=第三方 key）；
 > - **openai-compatible / xiaomi（B 档）**：取决于端点是否校验鉴权——空值合法 + warning，解析层填占位符 `"not-needed"`（详见 §9.2）；
-> - **bedrock（特殊）**：用 `aws_access_key_id` / `aws_secret_access_key` / `aws_region` / `aws_session_token` 四个独立字段，**不在 `[bedrock]` 节用 `api_key`**（详见 §8 `[bedrock]` 注释）。
+> - **bedrock（特殊）**：用 `aws_access_key_id` / `aws_secret_access_key` / `aws_region` / `aws_session_token` 四个独立字段，**不在 `providers/bedrock.toml` 里用 `api_key`**（详见 §8.3 `providers/bedrock.toml` 注释）。
 >
-> 注：baidu / iflytek / sensetime 在 v2+ 候选（详见 §3.5），v1 不配置这些 provider 节。
+> 注：baidu / iflytek / sensetime 在 v2+ 候选（详见 §3.5），v1 不创建这些 provider 文件。
 >
 > donkey TOML loader 对 `api_key` 缺失必须映射为 `""`（空串），**绝不返回 `None`**——见 §9.1.1 "TOML loader 实现守则"。
 
-### 8.3 全局模板
+### 8.3 providers/ 目录模板
 
 > ⚠️ **本节模板是"schema 参考模板"**——其中的 `api_key = ""` 表示**schema 层面的默认值 / 字段形状说明**，**不是**一份能被 `donkey load` 直接通过的配置：
-> - C 档云端 provider（21 家）空 `api_key` = **硬错 exit 11**（§9.2）；
-> - `donkey init` 生成的**出厂模板**对 C 档 provider 使用**占位符** `api_key = "REPLACE_ME"`（非空 → 静态检查通过），并要求用户替换为真实 key 后才能通过 F002-P2 的连通性检查（exit 15）。
+> - **一 provider 一文件**：每个 provider 独占 `providers/<provider_id>.toml`（文件边界 = schema 边界，P-1 / P-6）；
+> - **`enabled = false` 的文件完全惰性**：不校验字段、不要求 `api_key`、不参与连通性检查（§7.3）；
+> - C 档云端 provider（21 家）**enabled 之后**空 `api_key` = **硬错 exit 11**（§9.2）；
+> - `donkey init` 出厂 stub **全部 `enabled = false` + `api_key = ""`**——**不再需要 `REPLACE_ME` 占位符**（占位符 hack 随 v1 provider.toml 单文件设计一并废除；理由见 §7.1 末尾"占位符 hack 的废除"）。
 > - 本节模板保留 `api_key = ""`，是为了把"字段形状 + 默认值 + 解析层行为"讲清楚，不作为可直接使用的配置文件。
+
+#### 8.3.1 `providers/default.toml` —— 全局默认（保留名）
 
 ```toml
 # =============================================================================
-# provider.toml —— workspace 模型配置文件
+# providers/default.toml —— 全局默认（保留文件名，不可用作 provider 名）
 # =============================================================================
 #
-# 本文件由 `donkey init` 生成，用户可在文本编辑器 / IDE / Web UI 中修改。
-# 落地后由 `donkey.core.llm.schema.loader` 解析为 dataclass，
-# 再由 `donkey.core.llm.providers.<provider>.py` 解析层翻译为 provider 专有请求。
+# 本文件是 providers/ 目录里**唯一**不描述 provider 配置的文件。
+# 它只回答一个问题："这个 workspace 默认用哪个 provider 的哪个 model？"
 #
-# 设计原则：
-#   1. 每个 provider 独立一节；无统一 [provider] 顶层表
-#   2. api_key 仅 TOML 明文（P-2），不读环境变量
-#   3. api_host 对所有 provider 可选；Ollama 允许 "default"
-#   4. 字段拼写错误在 F002 load 阶段就报错（P-5）
-#   5. 白名单 v1 = 26 家（v2+ 候选 3 家推迟自研）；永久黑名单与暂不支持清单当前均空（详见 §3.0 治理原则 / §3.3 / §13.4 / §14.7）
+# 规则：
+#   1. default_provider 必须指向 providers/<provider_id>.toml（文件名 stem == provider_id）；
+#   2. 该 provider 文件必须 enabled = true（禁用态不能当默认）；
+#   3. default_model 必须存在于该 provider 文件的 [models] 表中。
 #
-# LangChain: init_chat_model("provider:model", **params)
-# =============================================================================
+# 校验失败一律 exit 11（ProviderTomlLoadError 伞形）——详见 §7.3 / §11.1。
 
-
-# -----------------------------------------------------------------------------
-# 顶层：全局默认
-# -----------------------------------------------------------------------------
-
-# 默认 provider_id。必填。决定应用层调哪个 ChatModel 类。
+# 默认 provider_id。必填。
 # 类型：str
-# 取值：openai | anthropic | google | ollama | xai | mistral | qwen | deepseek
-#       | doubao | kimi | zhipu | MiniMax | tencent | xiaomi | openai-compatible | meta
-#       | bedrock | groq | fireworks | together | cohere | perplexity | databricks
-#       | cerebras | openrouter | stepfun
-# 不在白名单 / 在黑名单 → F002 load 报错
-# 注：baidu / iflytek / sensetime 在 v2+ 候选（详见 §3.5），v1 配置会报错
+# 取值：v1 白名单 26 家之一（见 §3.1），且 providers/<provider_id>.toml 必须存在且 enabled = true
+# 例："openai" / "anthropic" / "minimax" / "deepseek" / "ollama"
 default_provider = ""
 
-# 默认 model_id。必填。必须在 default_provider 节下的 models 表中存在。
+# 默认 model_id。必填。必须存在于 providers/<default_provider>.toml 的 [models] 表中。
 # 类型：str
-# 示例："gpt-4o" / "claude-sonnet-4-6" / "qwen-max" / "deepseek-chat"
+# 例："gpt-4o" / "claude-sonnet-4-6" / "minimax-m3" / "deepseek-chat"
 default_model = ""
+```
 
+#### 8.3.2 26 个 provider 文件模板
 
-# -----------------------------------------------------------------------------
-# [openai] —— OpenAI（含 o 系列推理模型）
-# -----------------------------------------------------------------------------
+> 下列每个代码块 = 一个独立文件 `providers/<provider_id>.toml`。**文件名 stem 必须逐字符等于 provider_id**（§7.1 命名规则）；
+> 表头的注释即 Web UI 的 help_text 单一来源（§12.3）。
 
-[openai]
+##### 8.3.3 `providers/openai.toml` —— OpenAI（含 o 系列推理模型）
+
+```toml
+# =============================================================================
+# providers/openai.toml —— OpenAI（含 o 系列推理模型）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "openai" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 鉴权密钥。必填。OpenAI 官方 API key。
 # 类型：str
@@ -1139,25 +1166,35 @@ temperature = 1.0
 max_tokens = 16384
 
 # OpenAI 旗下注册的模型
-[openai.models.gpt-4o]
+[models.gpt-4o]
 # 模型级 temperature（覆盖 provider 默认）
 temperature = 1.0
 max_tokens = 16384
 
-[openai.models.o3]
+[models.o3]
 # o 系列推理模型专属
 reasoning_effort = "high"   # "low" | "medium" | "high"
 
-[openai.models.gpt-4o-mini]
+[models.gpt-4o-mini]
 temperature = 0.7
 max_tokens = 16384
+```
 
+##### 8.3.4 `providers/anthropic.toml` —— Anthropic Claude
 
-# -----------------------------------------------------------------------------
-# [anthropic] —— Anthropic Claude
-# -----------------------------------------------------------------------------
-
-[anthropic]
+```toml
+# =============================================================================
+# providers/anthropic.toml —— Anthropic Claude
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "anthropic" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 鉴权密钥。必填。Anthropic 官方 API key。
 # 类型：str
@@ -1176,7 +1213,7 @@ max_retries = 6
 # 字段：type ("enabled" | "disabled" | "adaptive"), budget_tokens (int)
 # 注：仅 Claude Sonnet 4.5+ / Opus 4.6+ 支持
 # adaptive 模式（Opus 4.6+）自动决定 budget_tokens；Sonnet 必须显式 budget_tokens
-[anthropic.thinking]
+[thinking]
 type = "disabled"
 budget_tokens = 10000
 
@@ -1213,29 +1250,39 @@ budget_tokens = 10000
 temperature = 1.0             # 范围：[0.0, 1.0]
 max_tokens = 4096             # ⚠️ Anthropic 必填 max_tokens
 
-[anthropic.models.claude-sonnet-4-6]
+[models.claude-sonnet-4-6]
 max_tokens = 4096
 temperature = 1.0
 
-[anthropic.models.claude-opus-4-6]
+[models.claude-opus-4-6]
 max_tokens = 8192
 # Opus 4.6+ 支持 thinking.type = "adaptive"，自动决定 budget
-[anthropic.models.claude-opus-4-6.thinking]
+[models.claude-opus-4-6.thinking]
 type = "adaptive"
 
-[anthropic.models.claude-fable-5]
+[models.claude-fable-5]
 # ⚠️ 严格模型：temperature / top_p / top_k 都受限制
 max_tokens = 8192
 temperature = 1.0              # 仅接受 1
 # top_p = 1.0                  # 仅接受 1（不要写非 1）
 # top_k 必须省略
+```
 
+##### 8.3.5 `providers/google.toml` —— Google Gemini
 
-# -----------------------------------------------------------------------------
-# [google] —— Google Gemini
-# -----------------------------------------------------------------------------
-
-[google]
+```toml
+# =============================================================================
+# providers/google.toml —— Google Gemini
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "google" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 鉴权密钥。必填。Google AI Studio API key（或 Vertex AI service account JSON）。
 # 类型：str
@@ -1250,7 +1297,7 @@ max_retries = 6
 
 # Google 专属：思考模式。选填。默认 disabled。
 # 类型：table
-[google.thinking_config]
+[thinking_config]
 include_thoughts = false
 thinking_budget = 0           # 0 = disabled
 
@@ -1259,20 +1306,30 @@ max_tokens = 8192
 top_p = 0.95
 top_k = 40                    # Google 专属
 
-[google.models.gemini-2.0-flash]
+[models.gemini-2.0-flash]
 temperature = 1.0
 max_tokens = 8192
 
-[google.models.gemini-2.0-pro]
+[models.gemini-2.0-pro]
 max_tokens = 8192
 thinking_budget = 10000       # 此 model 默认开启 thinking
+```
 
+##### 8.3.6 `providers/ollama.toml` —— Ollama（本地运行）
 
-# -----------------------------------------------------------------------------
-# [ollama] —— Ollama（本地运行）
-# -----------------------------------------------------------------------------
-
-[ollama]
+```toml
+# =============================================================================
+# providers/ollama.toml —— Ollama（本地运行）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "ollama" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 鉴权密钥。Ollama 一般不需要鉴权。留空即可。
 # 类型：str
@@ -1301,19 +1358,29 @@ max_retries = 6
 temperature = 0.7
 max_tokens = 2048
 
-[ollama.models.llama3.1-70b]
+[models.llama3.1-70b]
 num_ctx = 8192
 temperature = 0.7
 
-[ollama.models.qwen2.5-72b]
+[models.qwen2.5-72b]
 num_ctx = 4096
+```
 
+##### 8.3.7 `providers/xai.toml` —— xAI Grok
 
-# -----------------------------------------------------------------------------
-# [xai] —— xAI Grok
-# -----------------------------------------------------------------------------
-
-[xai]
+```toml
+# =============================================================================
+# providers/xai.toml —— xAI Grok
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "xai" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 鉴权密钥。必填。xAI API key。
 api_key = ""
@@ -1331,18 +1398,28 @@ max_tokens = 16384
 # 类型：bool
 search_enabled = false
 
-[xai.models.grok-2]
+[models.grok-2]
 max_tokens = 16384
 
-[xai.models.grok-2-mini]
+[models.grok-2-mini]
 reasoning_effort = "low"
+```
 
+##### 8.3.8 `providers/mistral.toml` —— Mistral AI
 
-# -----------------------------------------------------------------------------
-# [mistral] —— Mistral AI
-# -----------------------------------------------------------------------------
-
-[mistral]
+```toml
+# =============================================================================
+# providers/mistral.toml —— Mistral AI
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "mistral" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 鉴权密钥。必填。Mistral API key。
 api_key = ""
@@ -1360,18 +1437,28 @@ max_tokens = 4096
 # 注：LangChain ChatMistralAI 字段名是 `safe_mode`（对应 Mistral 官方 API 的 `safe_prompt`）
 safe_mode = false
 
-[mistral.models.mistral-large-latest]
+[models.mistral-large-latest]
 max_tokens = 4096
 
-[mistral.models.pixtral-12b-2409]
+[models.pixtral-12b-2409]
 max_tokens = 4096
+```
 
+##### 8.3.9 `providers/qwen.toml` —— 阿里通义千问（OpenAI 兼容）
 
-# -----------------------------------------------------------------------------
-# [qwen] —— 阿里通义千问（OpenAI 兼容）
-# -----------------------------------------------------------------------------
-
-[qwen]
+```toml
+# =============================================================================
+# providers/qwen.toml —— 阿里通义千问（OpenAI 兼容）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "qwen" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 鉴权密钥。必填。阿里云百炼 / DashScope API key。
 api_key = ""
@@ -1394,26 +1481,36 @@ enable_search = false
 # - 其它模型（如 qwen-max / qwen-plus）→ 走 ChatQwen（QwenGeneralThinkingProvider）
 default_thinking = "auto"     # "auto" | "enabled" | "disabled"
 
-[qwen.models.qwen-max]
+[models.qwen-max]
 max_tokens = 8192
 
-[qwen.models.qwen-vl-max]
+[models.qwen-vl-max]
 # 多模态
 max_tokens = 4096
 
 # QwQ 推理模型专用 entries（让用户显式声明这些模型走 ChatQwQ）
-[qwen.models.qwq-32b-preview]
+[models.qwq-32b-preview]
 max_tokens = 32768
 
-[qwen.models.qwq-plus]
+[models.qwq-plus]
 max_tokens = 32768
+```
 
+##### 8.3.10 `providers/deepseek.toml` —— DeepSeek（专用 LangChain 类：ChatDeepSeek）
 
-# -----------------------------------------------------------------------------
-# [deepseek] —— DeepSeek（专用 LangChain 类：ChatDeepSeek）
-# -----------------------------------------------------------------------------
-
-[deepseek]
+```toml
+# =============================================================================
+# providers/deepseek.toml —— DeepSeek（专用 LangChain 类：ChatDeepSeek）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "deepseek" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 注：走专用 `ChatDeepSeek` 类（langchain-deepseek）——保留 reasoning_content；
 # 禁止走 ChatOpenAI + base_url，否则推理过程会被丢弃。
@@ -1429,20 +1526,30 @@ max_retries = 6
 temperature = 1.0
 max_tokens = 4096
 
-[deepseek.models.deepseek-chat]
+[models.deepseek-chat]
 max_tokens = 4096
 
-[deepseek.models.deepseek-reasoner]
+[models.deepseek-reasoner]
 # 推理模型：deepseek-reasoner 不支持工具调用；ChatDeepSeek 保留 reasoning_content
 max_tokens = 8192
 reasoning_effort = "medium"   # "low" | "medium" | "high"
+```
 
+##### 8.3.11 `providers/doubao.toml` —— 字节豆包（火山引擎方舟，OpenAI 兼容）
 
-# -----------------------------------------------------------------------------
-# [doubao] —— 字节豆包（火山引擎方舟，OpenAI 兼容）
-# -----------------------------------------------------------------------------
-
-[doubao]
+```toml
+# =============================================================================
+# providers/doubao.toml —— 字节豆包（火山引擎方舟，OpenAI 兼容）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "doubao" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 鉴权密钥。必填。火山引擎方舟 API key。
 api_key = ""
@@ -1456,18 +1563,28 @@ max_retries = 6
 temperature = 1.0
 max_tokens = 4096
 
-[doubao.models.doubao-pro-32k]
+[models.doubao-pro-32k]
 max_tokens = 32768
 
-[doubao.models.doubao-lite-32k]
+[models.doubao-lite-32k]
 max_tokens = 32768
+```
 
+##### 8.3.12 `providers/kimi.toml` —— 月之暗面 Kimi（OpenAI 兼容）
 
-# -----------------------------------------------------------------------------
-# [kimi] —— 月之暗面 Kimi（OpenAI 兼容）
-# -----------------------------------------------------------------------------
-
-[kimi]
+```toml
+# =============================================================================
+# providers/kimi.toml —— 月之暗面 Kimi（OpenAI 兼容）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "kimi" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 api_key = ""
 api_host = ""                 # 默认 "https://api.moonshot.cn/v1"
@@ -1476,18 +1593,28 @@ max_retries = 6
 temperature = 0.3             # Kimi 官方推荐 0.3
 max_tokens = 4096
 
-[kimi.models.moonshot-v1-128k]
+[models.moonshot-v1-128k]
 max_tokens = 128000
 
-[kimi.models.kimi-k2-0711-preview]
+[models.kimi-k2-0711-preview]
 max_tokens = 8192
+```
 
+##### 8.3.13 `providers/zhipu.toml` —— 智谱 GLM（OpenAI 兼容）
 
-# -----------------------------------------------------------------------------
-# [zhipu] —— 智谱 GLM（OpenAI 兼容）
-# -----------------------------------------------------------------------------
-
-[zhipu]
+```toml
+# =============================================================================
+# providers/zhipu.toml —— 智谱 GLM（OpenAI 兼容）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "zhipu" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 api_key = ""
 api_host = ""                 # 默认 "https://open.bigmodel.cn/api/paas/v4"
@@ -1496,17 +1623,29 @@ max_retries = 6
 temperature = 0.7
 max_tokens = 4096
 
-[zhipu.models.glm-4-plus]
+[models.glm-4-plus]
 max_tokens = 4096
 
-[zhipu.models.glm-4v-plus]
+[models.glm-4v-plus]
 # 多模态
 max_tokens = 4096
+```
 
+##### 8.3.14 `providers/minimax.toml` —— MiniMax M（OpenAI 兼容 + Coding Plan `sk-cp-` 密钥）
 
-# -----------------------------------------------------------------------------
-# [MiniMax] —— MiniMax M（OpenAI 兼容 + Coding Plan `sk-cp-` 密钥）
-# -----------------------------------------------------------------------------
+```toml
+# =============================================================================
+# providers/minimax.toml —— MiniMax M（OpenAI 兼容 + Coding Plan `sk-cp-` 密钥）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "minimax" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 [MiniMax]
 
@@ -1528,25 +1667,35 @@ max_tokens = 4096
 # Coding Plan 端点默认 reasoning_split=false，thinking 在 content 里以 <think> 标签包裹。
 # 若想让 reasoning 走 reasoning_content 字段（需用 ChatAnthropic 之外的专用类），v2+ 实现。
 
-[MiniMax.models.MiniMax-M3]
+[models.MiniMax-M3]
 max_tokens = 8192
 
 # ⚠️ model_id 含 "." 时**必须加引号**。TOML 裸 key 不允许含 "."，
-#    写成 [MiniMax.models.MiniMax-M2.7] 会被解析成嵌套表
+#    写成 [models.MiniMax-M2.7] 会被解析成嵌套表
 #    （MiniMax-M2 → 7），模型表结构被**静默破坏**（models["MiniMax-M2.7"] 永远查不到）。
 #    bedrock 的 us.anthropic.claude-sonnet-4-6 同理。
-[MiniMax.models."MiniMax-M2.7"]
+[models."MiniMax-M2.7"]
 max_tokens = 4096
 
-[MiniMax.models.MiniMax-M2]
+[models.MiniMax-M2]
 max_tokens = 4096
+```
 
+##### 8.3.15 `providers/tencent.toml` —— 腾讯混元（OpenAI 兼容）
 
-# -----------------------------------------------------------------------------
-# [tencent] —— 腾讯混元（OpenAI 兼容）
-# -----------------------------------------------------------------------------
-
-[tencent]
+```toml
+# =============================================================================
+# providers/tencent.toml —— 腾讯混元（OpenAI 兼容）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "tencent" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 api_key = ""                  # 腾讯云 API SecretId:SecretKey 组合
 api_host = ""                 # 默认 "https://api.hunyuan.cloud.tencent.com/v1"
@@ -1555,15 +1704,25 @@ max_retries = 6
 temperature = 1.0
 max_tokens = 4096
 
-[tencent.models.hunyuan-pro]
+[models.hunyuan-pro]
 max_tokens = 4096
+```
 
+##### 8.3.16 `providers/xiaomi.toml` —— 小米 MiMo
 
-# -----------------------------------------------------------------------------
-# [xiaomi] —— 小米 MiMo
-# -----------------------------------------------------------------------------
-
-[xiaomi]
+```toml
+# =============================================================================
+# providers/xiaomi.toml —— 小米 MiMo
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "xiaomi" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 多平台路由：
 #   - 自托管 → api_key 留空，api_host = "http://localhost:11434"（走 ollama 解析层）
@@ -1576,7 +1735,7 @@ max_retries = 6
 temperature = 0.7
 max_tokens = 4096
 
-[xiaomi.models.mimo-7b-rl]
+[models.mimo-7b-rl]
 max_tokens = 4096
 
 
@@ -1584,13 +1743,23 @@ max_tokens = 4096
 #   [baidu]    百度文心 ERNIE（OAuth + 私有协议）→ 见 §3.5
 #   [iflytek]  科大讯飞星火（WebSocket + HMAC-SHA256）→ 见 §3.5
 #   [sensetime] 商汤日日新（私有 API）→ 见 §3.5
+```
 
+##### 8.3.17 `providers/stepfun.toml` —— 阶跃星辰 Step（OpenAI 兼容）
 
-# -----------------------------------------------------------------------------
-# [stepfun] —— 阶跃星辰 Step（OpenAI 兼容）
-# -----------------------------------------------------------------------------
-
-[stepfun]
+```toml
+# =============================================================================
+# providers/stepfun.toml —— 阶跃星辰 Step（OpenAI 兼容）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "stepfun" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 api_key = ""
 api_host = ""                 # 默认 stepfun 官方 OpenAI 兼容端点
@@ -1599,19 +1768,29 @@ max_retries = 6
 temperature = 0.7
 max_tokens = 4096
 
-[stepfun.models.step-2-16k]
+[models.step-2-16k]
 max_tokens = 16384
 
-[stepfun.models.step-1v-8k]
+[models.step-1v-8k]
 # 多模态
 max_tokens = 8192
+```
 
+##### 8.3.18 `providers/openai-compatible.toml` —— OpenAI Compatible 通用元 provider
 
-# -----------------------------------------------------------------------------
-# [openai-compatible] —— OpenAI Compatible 通用元 provider
-# -----------------------------------------------------------------------------
-
-[openai-compatible]
+```toml
+# =============================================================================
+# providers/openai-compatible.toml —— OpenAI Compatible 通用元 provider
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "openai-compatible" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 鉴权密钥。必填。第三方 OpenAI 兼容服务的 API key。
 api_key = ""
@@ -1630,15 +1809,25 @@ max_retries = 6
 temperature = 1.0
 max_tokens = 4096
 
-[openai-compatible.models.custom-model-name]
+[models.custom-model-name]
 max_tokens = 4096
+```
 
+##### 8.3.19 `providers/meta.toml` —— Meta Llama（多平台路由）
 
-# -----------------------------------------------------------------------------
-# [meta] —— Meta Llama（多平台路由）
-# -----------------------------------------------------------------------------
-
-[meta]
+```toml
+# =============================================================================
+# providers/meta.toml —— Meta Llama（多平台路由）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "meta" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 鉴权密钥。取决于平台。
 #   - 自托管（Ollama）：留空
@@ -1662,18 +1851,28 @@ max_retries = 6
 temperature = 0.7
 max_tokens = 4096
 
-[meta.models.llama-3.1-70b-instruct]
+[models.llama-3.1-70b-instruct]
 max_tokens = 4096
 
-[meta.models.llama-3.1-405b-instruct]
+[models.llama-3.1-405b-instruct]
 max_tokens = 8192
+```
 
+##### 8.3.20 `providers/bedrock.toml` —— AWS Bedrock（多模型聚合；走 ChatBedrock）
 
-# -----------------------------------------------------------------------------
-# [bedrock] —— AWS Bedrock（多模型聚合；走 ChatBedrock）
-# -----------------------------------------------------------------------------
-
-[bedrock]
+```toml
+# =============================================================================
+# providers/bedrock.toml —— AWS Bedrock（多模型聚合；走 ChatBedrock）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "bedrock" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 注：走专用 `ChatBedrock` 类（langchain-aws）。Bedrock 是元 provider，
 # 通过 model_provider 字段聚合 Claude / Llama / Mistral / Titan 等模型。
@@ -1706,7 +1905,7 @@ aws_session_token = ""
 #
 # ⚠️ 若 models 子表用**带 "." 的真实 model_id**（如
 #    "us.anthropic.claude-sonnet-4-6"），TOML 裸 key 不允许含 "."，
-#    必须加引号 → [bedrock.models."us.anthropic.claude-sonnet-4-6"]
+#    必须加引号 → [models."us.anthropic.claude-sonnet-4-6"]
 #    否则会被解析成嵌套表（us → anthropic → claude-sonnet-4-6），模型表静默损坏。
 #    （下例用短别名规避该问题——两种写法都可以，但**不要混用**。）
 
@@ -1715,19 +1914,29 @@ max_retries = 6
 temperature = 1.0
 max_tokens = 4096
 
-[bedrock.models.claude-sonnet-4-6]
+[models.claude-sonnet-4-6]
 # Bedrock 上的 Claude（与 anthropic 节不同的鉴权路径）
 max_tokens = 4096
 
-[bedrock.models.llama-3.1-70b-instruct]
+[models.llama-3.1-70b-instruct]
 max_tokens = 4096
+```
 
+##### 8.3.21 `providers/groq.toml` —— Groq（高速 LPU 推理）
 
-# -----------------------------------------------------------------------------
-# [groq] —— Groq（高速 LPU 推理）
-# -----------------------------------------------------------------------------
-
-[groq]
+```toml
+# =============================================================================
+# providers/groq.toml —— Groq（高速 LPU 推理）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "groq" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 走专用 `ChatGroq` 类（langchain-groq）。Groq LPU 推理速度极快（数百 token/s），
 # 支持 Llama / Mixtral / Gemma 等开源模型。
@@ -1739,18 +1948,28 @@ max_retries = 6
 temperature = 0.7
 max_tokens = 4096
 
-[groq.models.llama-3.3-70b-versatile]
+[models.llama-3.3-70b-versatile]
 max_tokens = 4096
 
-[groq.models.mixtral-8x7b-32768]
+[models.mixtral-8x7b-32768]
 max_tokens = 32768
+```
 
+##### 8.3.22 `providers/fireworks.toml` —— Fireworks AI（多模型推理平台）
 
-# -----------------------------------------------------------------------------
-# [fireworks] —— Fireworks AI（多模型推理平台）
-# -----------------------------------------------------------------------------
-
-[fireworks]
+```toml
+# =============================================================================
+# providers/fireworks.toml —— Fireworks AI（多模型推理平台）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "fireworks" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 走专用 `ChatFireworks` 类（langchain-fireworks）。Fireworks 部署 100+ 开源模型。
 
@@ -1761,15 +1980,25 @@ max_retries = 6
 temperature = 0.7
 max_tokens = 4096
 
-[fireworks.models.accounts/fireworks/models/llama-v3p3-70b-instruct]
+[models."accounts/fireworks/models/llama-v3p3-70b-instruct"]
 max_tokens = 4096
+```
 
+##### 8.3.23 `providers/together.toml` —— Together AI（多模型推理平台）
 
-# -----------------------------------------------------------------------------
-# [together] —— Together AI（多模型推理平台）
-# -----------------------------------------------------------------------------
-
-[together]
+```toml
+# =============================================================================
+# providers/together.toml —— Together AI（多模型推理平台）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "together" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 走专用 `ChatTogether` 类（langchain-together）。
 
@@ -1780,15 +2009,25 @@ max_retries = 6
 temperature = 0.7
 max_tokens = 4096
 
-[together.models.meta-llama/Llama-3.3-70B-Instruct-Turbo]
+[models."meta-llama/Llama-3".3-70B-Instruct-Turbo]
 max_tokens = 4096
+```
 
+##### 8.3.24 `providers/cohere.toml` —— Cohere（Command R 系列，企业 RAG 强项）
 
-# -----------------------------------------------------------------------------
-# [cohere] —— Cohere（Command R 系列，企业 RAG 强项）
-# -----------------------------------------------------------------------------
-
-[cohere]
+```toml
+# =============================================================================
+# providers/cohere.toml —— Cohere（Command R 系列，企业 RAG 强项）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "cohere" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 走专用 `ChatCohere` 类（langchain-cohere）。
 
@@ -1799,15 +2038,25 @@ max_retries = 6
 temperature = 0.3
 max_tokens = 4096
 
-[cohere.models.command-r-plus]
+[models.command-r-plus]
 max_tokens = 4096
+```
 
+##### 8.3.25 `providers/perplexity.toml` —— Perplexity（Sonar 系列含联网搜索）
 
-# -----------------------------------------------------------------------------
-# [perplexity] —— Perplexity（Sonar 系列含联网搜索）
-# -----------------------------------------------------------------------------
-
-[perplexity]
+```toml
+# =============================================================================
+# providers/perplexity.toml —— Perplexity（Sonar 系列含联网搜索）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "perplexity" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 走专用 `ChatPerplexity` 类（langchain-perplexity）。
 # 注：Perplexity Sonar 模型自带联网搜索（不可关闭），需特别注意输出带引用。
@@ -1819,15 +2068,25 @@ max_retries = 6
 temperature = 0.2
 max_tokens = 4096
 
-[perplexity.models.llama-3.1-sonar-large-128k-online]
+[models.llama-3.1-sonar-large-128k-online]
 max_tokens = 4096
+```
 
+##### 8.3.26 `providers/databricks.toml` —— Databricks（自家模型 + 开源模型托管）
 
-# -----------------------------------------------------------------------------
-# [databricks] —— Databricks（自家模型 + 开源模型托管）
-# -----------------------------------------------------------------------------
-
-[databricks]
+```toml
+# =============================================================================
+# providers/databricks.toml —— Databricks（自家模型 + 开源模型托管）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "databricks" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 走专用 `ChatDatabricks` 类（databricks-langchain）。
 # 鉴权用 Databricks Personal Access Token + endpoint URL。
@@ -1839,15 +2098,25 @@ max_retries = 6
 temperature = 0.7
 max_tokens = 4096
 
-[databricks.models.databricks-dbrx-instruct]
+[models.databricks-dbrx-instruct]
 max_tokens = 4096
+```
 
+##### 8.3.27 `providers/cerebras.toml` —— Cerebras（晶圆级推理）
 
-# -----------------------------------------------------------------------------
-# [cerebras] —— Cerebras（晶圆级推理）
-# -----------------------------------------------------------------------------
-
-[cerebras]
+```toml
+# =============================================================================
+# providers/cerebras.toml —— Cerebras（晶圆级推理）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "cerebras" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # 走专用 `ChatCerebras` 类（langchain-cerebras）。
 
@@ -1858,15 +2127,25 @@ max_retries = 6
 temperature = 0.7
 max_tokens = 4096
 
-[cerebras.models.llama-3.3-70b]
+[models.llama-3.3-70b]
 max_tokens = 4096
+```
 
+##### 8.3.28 `providers/openrouter.toml` —— OpenRouter（统一路由 100+ 模型）
 
-# -----------------------------------------------------------------------------
-# [openrouter] —— OpenRouter（统一路由 100+ 模型）
-# -----------------------------------------------------------------------------
-
-[openrouter]
+```toml
+# =============================================================================
+# providers/openrouter.toml —— OpenRouter（统一路由 100+ 模型）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "openrouter" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
 
 # ⚠️ 走专用 `ChatOpenRouter` 类（langchain-openrouter）。
 # 禁止走 ChatOpenAI + base_url——OpenRouter 自带多 provider routing 和
@@ -1887,23 +2166,53 @@ max_retries = 6
 temperature = 1.0
 max_tokens = 4096
 
-[openrouter.models.auto]
+[models.auto]
 # "auto" 模型让 OpenRouter 自动选择
 max_tokens = 4096
 
-[openrouter.models.anthropic/claude-sonnet-4-6]
+[models."anthropic/claude-sonnet-4-6"]
 max_tokens = 4096
 
-[openrouter.models.deepseek/deepseek-chat]
+[models."deepseek/deepseek-chat"]
 # 经 OpenRouter 调用 DeepSeek——保留 reasoning_content（由 ChatOpenRouter 处理）
 max_tokens = 4096
 
-[openrouter.models.openai/o3]
+[models."openai/o3"]
 reasoning_effort = "high"     # OpenRouter 透传
 ```
 
----
+#### 8.3.29 汇总速查表
 
+| provider_id | 文件名 | 鉴权档位（§9.2） | `api_host` | provider 专属字段 |
+|---|---|---|---|---|
+| `openai` | `providers/openai.toml` | C | 选填 | `openai_organization` / `openai_project` |
+| `anthropic` | `providers/anthropic.toml` | C | 选填 | `[thinking]`（type / budget_tokens） |
+| `google` | `providers/google.toml` | C | 选填 | `[thinking_config]`（include_thoughts / thinking_budget） |
+| `ollama` | `providers/ollama.toml` | A | 选填（允许 `"default"`） | `num_ctx` / `num_predict` / `repeat_penalty` / `mirostat` |
+| `xai` | `providers/xai.toml` | C | 选填 | `search_enabled` |
+| `mistral` | `providers/mistral.toml` | C | 选填 | `safe_mode` |
+| `qwen` | `providers/qwen.toml` | C | 选填 | 推理模型按 model_name 分派 ChatQwQ / ChatQwen（§15.2） |
+| `deepseek` | `providers/deepseek.toml` | C | 选填 | 专用 `ChatDeepSeek`（保留 reasoning_content） |
+| `doubao` | `providers/doubao.toml` | C | 选填 | — |
+| `kimi` | `providers/kimi.toml` | C | 选填 | 推理模型走 `ChatMoonshot`（保留 reasoning_content） |
+| `zhipu` | `providers/zhipu.toml` | C | 选填 | — |
+| `minimax` | `providers/minimax.toml` | C | 选填 | OpenAI 兼容端点（§3.6） |
+| `tencent` | `providers/tencent.toml` | C | 选填 | — |
+| `xiaomi` | `providers/xiaomi.toml` | B | 选填 | `routing_platform`（多平台路由） |
+| `stepfun` | `providers/stepfun.toml` | C | 选填 | — |
+| `openai-compatible` | `providers/openai-compatible.toml` | B | **必填** | 元 provider（内部自建 / Newapi / Oneapi / 中转站） |
+| `meta` | `providers/meta.toml` | A | **必填** | `routing_platform`（多平台路由） |
+| `bedrock` | `providers/bedrock.toml` | 特殊（4 个 `aws_*`） | **不允许覆盖** | `aws_access_key_id` / `aws_secret_access_key` / `aws_region` / `aws_session_token` |
+| `groq` | `providers/groq.toml` | C | 选填 | — |
+| `fireworks` | `providers/fireworks.toml` | C | 选填 | — |
+| `together` | `providers/together.toml` | C | 选填 | — |
+| `cohere` | `providers/cohere.toml` | C | 选填 | — |
+| `perplexity` | `providers/perplexity.toml` | C | 选填 | 联网搜索模型 |
+| `databricks` | `providers/databricks.toml` | C（PAT） | **必填** | Personal Access Token |
+| `cerebras` | `providers/cerebras.toml` | C | 选填 | — |
+| `openrouter` | `providers/openrouter.toml` | C | 选填 | 元 provider（保留 reasoning_details） |
+
+---
 ## 9. 鉴权设计：TOML 明文强制
 
 ### 9.1 为什么不读环境变量（P-2 理由）
@@ -1969,7 +2278,7 @@ def load_api_key(provider_section: dict[str, Any] | None) -> str:
 1. **缺失 → `""`**：tomllib / 任何 TOML 解析器的"键不存在"必须规范化为 `""`，**绝不传 `None`**。
 2. **`None` 显式 → `""`**：用户写 `api_key = ""` 或 `api_key = null`（TOML 里 `null` 即 Python `None`）都规范化为 `""`。
 3. **非字符串值 → type error**：TOML 1.0 合法值只有 str / int / float / bool / array / table / datetime，**TOML schema 校验（F002 load）必须拒绝非字符串 `api_key`**（如 `api_key = 42` 或 `api_key = ["..."]`）——避免 LangChain 收到奇怪类型。
-4. **`bedrock` 例外**：`[bedrock]` 不使用 `api_key` 字段（改用 `aws_access_key_id` / `aws_secret_access_key` / `aws_region` 独立字段，详见 §8 `[bedrock]` 注释），`boto3.Session(...)` 显式构造**不会读 env var**，与 §9.1 立场完全对齐。
+4. **`bedrock` 例外**：`providers/bedrock.toml` 不使用 `api_key` 字段（改用 `aws_access_key_id` / `aws_secret_access_key` / `aws_region` 独立字段，详见 §8.3 `providers/bedrock.toml` 注释），`boto3.Session(...)` 显式构造**不会读 env var**，与 §9.1 立场完全对齐。
 5. **`ollama` 例外**：`api_key = ""` 是合法的（Ollama 默认无鉴权），无 warning，无报错。
 
 > **实测补充——`api_key = ""` 的真实终点**：
@@ -1984,7 +2293,7 @@ def load_api_key(provider_section: dict[str, Any] | None) -> str:
 >
 > **推论（影响 §7.3 / §9.2 的 warning 语义）**：
 > 1. 空 `api_key` 的失败点发生在**构造 ChatModel / client 阶段**，**不是**运行时的 401 → 运行时映射应按 §4.3.1 的**构造期行**处理（→ exit 90）；
-> 2. 异常文案**直接指向 env var**，与 §9.1 立场正面冲突 → CLI 层**必须改写文案**（"api_key 未配置或为空，请检查 provider.toml"），不得把用户引向 `export OPENAI_API_KEY`；
+> 2. 异常文案**直接指向 env var**，与 §9.1 立场正面冲突 → CLI 层**必须改写文案**（"api_key 未配置或为空，请检查 providers/<provider_id>.toml"），不得把用户引向 `export OPENAI_API_KEY`；
 > 3. **不改变**"donkey 不读 env var"的立场：LangChain 层确实没读，是底层 SDK 自己的报错文案在提 env var。
 
 ### 9.2 `api_key` 强制明文
@@ -1998,7 +2307,7 @@ def load_api_key(provider_section: dict[str, Any] | None) -> str:
 > | **Ollama 本地 server** | 官方 OpenAI 兼容文档：*"The client requires an API key value, but **Ollama ignores it**"*，示例 `api_key='ollama',  # required but ignored`；curl 示例**完全不带** `Authorization` header | ✅ 服务端**不校验** |
 > | **vLLM 本地 server** | 官方 `--api-key`：*"**If provided**, the server will require one of these keys to be presented in the header"* → **默认不传 = 不校验** | ✅ 服务端**不校验** |
 > | **LiteLLM proxy / 任意 OpenAI 兼容端点** | 官方 config 支持 `api_key: <your-vllm-api-key\|none>`；官方示例 `openai.OpenAI(api_key="anything", base_url=...)` | ⚠️ **端点属性运行时才知道** |
-> | **云端 provider**（OpenAI / Anthropic / DeepSeek / MiniMax / qwen …） | key 是真实凭据，服务端强校验 | ❌ **必须有效** |
+> | **云端 provider**（OpenAI / Anthropic / DeepSeek / minimax / qwen …） | key 是真实凭据，服务端强校验 | ❌ **必须有效** |
 >
 > **但"允许空"≠"可以传空串"**——实测（openai SDK 3.35.1）：
 >
@@ -2016,7 +2325,7 @@ def load_api_key(provider_section: dict[str, Any] | None) -> str:
 > |---|---|---|---|---|
 > | **A. 无鉴权本地** | `ollama`、`meta`（自托管路由） | ✅ **合法** | 无 warning | `ChatOllama`（无 `api_key` 字段），直接传 `""` |
 > | **B. 端点属性未知** | `openai-compatible`（可能指本地 vLLM，也可能指云端中转站）、`xiaomi`（多平台路由：OpenRouter 云端 / Ollama 本地） | ✅ **合法** | **warning**（exit 0）："该端点是否校验鉴权未知" | **填占位符**（`"not-needed"`）再构造 `ChatOpenAI` / `ChatOpenRouter` |
-> | **C. 云端 provider** | 其余 21 个：openai / anthropic / google / xai / mistral / qwen / deepseek / doubao / kimi / zhipu / MiniMax / tencent / stepfun / groq / fireworks / together / cohere / perplexity / databricks / cerebras / openrouter | ❌ **非法** | **硬错 exit 11**（`ProviderTomlFieldError`） | — |
+> | **C. 云端 provider** | 其余 21 个：openai / anthropic / google / xai / mistral / qwen / deepseek / doubao / kimi / zhipu / minimax / tencent / stepfun / groq / fireworks / together / cohere / perplexity / databricks / cerebras / openrouter | ❌ **非法** | **硬错 exit 11**（`ProviderTomlFieldError`） | — |
 > | **（不适用）** | `bedrock`——**不使用 `api_key` 字段**（用 `aws_secret_access_key` 等 4 个独立字段，见 §8.1 注 2） | — | 不适用 | `boto3.Session(...)` 显式构造 |
 >
 > **为什么 C 档选"硬错"而不是 warning**：
@@ -2047,8 +2356,8 @@ def load_api_key(provider_section: dict[str, Any] | None) -> str:
 
 **v1 决定**：仅明文 TOML，**不**实现任何加密 / 外部密钥机制。用户如担心泄露：
 
-1. 将 `provider.toml` 加入 `.gitignore`；
-2. 团队共享时使用脱敏的 `provider.toml.example`（含 `api_key = "REPLACE_ME"`）+ 单独的安全分发渠道传真实 key。
+1. 将 `providers/` 目录加入 `.gitignore`；
+2. 团队共享时使用脱敏的 `providers/*.example.toml`（含 `api_key = "REPLACE_ME"`）+ 单独的安全分发渠道传真实 key。
 
 ### 9.4 网络出口的 env var 依赖（§9.1 立场的边界）
 
@@ -2073,7 +2382,7 @@ def load_api_key(provider_section: dict[str, Any] | None) -> str:
 - 该检查**只做环境适配，不改变网络语义**：能识别 `socks://` → 改写为 `socks5://`（装了 `socksio` 时）；缺 `socksio` → 摘除该代理变量退回直连，并打印可操作的诊断；
 - **与 G-3（跨 OS 行为一致）的关系**：§9.1 保证了"**凭据**行为跨 OS 一致"，但"**出口**行为"仍随机器环境变化——README 的风险声明里应如实写明这一条（详见 §13.3 建议补充项）。
 
-**实现要点**（`donkey/core/llm/network/transport.py` 建议伪代码）：
+**实现要点**（`donkey/core/llm/network/env_sanitize.py` 伪代码——网络层唯一自研点，只做环境适配，不实现 transport，见 §2.2）：
 
 ```python
 # 在创建任何 httpx client 之前调用一次
@@ -2115,7 +2424,7 @@ def sanitize_proxy_env() -> None:
 | doubao | ❌ | ❌ | `https://ark.cn-beijing.volces.com/api/v3` |
 | kimi | ❌ | ❌ | `https://api.moonshot.cn/v1` |
 | zhipu | ❌ | ❌ | `https://open.bigmodel.cn/api/paas/v4` |
-| MiniMax | ❌ | ❌ | `https://api.minimaxi.com/v1`（OpenAI 兼容 + `sk-cp-` Coding Plan）|
+| minimax | ❌ | ❌ | `https://api.minimaxi.com/v1`（OpenAI 兼容 + `sk-cp-` Coding Plan）|
 | tencent | ❌ | ❌ | `https://api.hunyuan.cloud.tencent.com/v1` |
 | xiaomi | ❌ | ❌ | 取决于平台（多路由） |
 | stepfun | ❌ | ❌ | stepfun 官方 |
@@ -2181,41 +2490,52 @@ openai-compatible **没有"官方 endpoint"**——用户必须显式告诉解�
 
 ### 11.1 F002 load 校验清单
 
-> exit 11 严格归 `ProviderTomlLoadError` **伞形 Error class**（详见 `harness/features/README.md §3.2.1`）。所有"`provider.toml` 加载失败"在 CLI 层映射同一 exit 11；子类 Error class（如下表 4-7 列）在 traceback 与 logging 中**仍可区分具体原因**，便于排查。
+> exit 11 严格归 `ProviderTomlLoadError` **伞形 Error class**（详见 `harness/features/README.md §3.2.1`）。所有"`providers/` 目录加载失败"在 CLI 层映射同一 exit 11；子类 Error class（如下表 4-7 列）在 traceback 与 logging 中**仍可区分具体原因**，便于排查。
+>
+> ⚠️ **多文件布局下，错误消息必须带文件路径**（`providers/openai.toml: ...`）——"哪个文件错了"是用户修复的第一步。
 
 | # | 校验项 | 触发 | 严重度 | 伞形 Error class · 子类 | exit code |
 |---|---|---|---|---|---|
-| 1 | TOML 语法解析 | `tomllib.TOMLDecodeError` | error | `ProviderTomlLoadError` · `ProviderTomlSyntaxError` | 11 |
-| 2 | 顶层 `default_provider` 缺失 | — | error | `ProviderTomlLoadError` · `ProviderTomlFieldError` | 11 |
-| 3 | 顶层 `default_model` 缺失 | — | error | `ProviderTomlLoadError` · `ProviderTomlFieldError` | 11 |
-| 4 | `default_provider` ∉ 白名单 | 不在 v1 26 家 | error | `ProviderTomlLoadError` · `ProviderTomlScopeError` | 11 |
-| 5 | `default_provider` ∈ 永久黑名单 | v1 空集合（占位行） | error | `ProviderTomlLoadError` · `ProviderTomlScopeError` | 11 |
-| 6 | `default_provider` ∈ 暂不支持清单 | v1 阶段空集合（占位行） | error | `ProviderTomlLoadError` · `ProviderTomlScopeError` | 11 |
-| 7 | `default_provider` ∈ v2+ 候选（baidu / iflytek / sensetime） | v1 不支持 | error | `ProviderTomlLoadError` · `ProviderTomlScopeError` | 11 |
-| 8 | `[<未列入 §3.1 或 §3.5 的 provider_id>]` 任何节 | v1 范围校验 | error | `ProviderTomlLoadError` · `ProviderTomlScopeError` | 11 |
-| 9 | provider 节内字段拼写错误 | Pydantic `ValidationError`（unknown field） | error | `ProviderTomlLoadError` · `ProviderTomlFieldError` | 11 |
-| 10 | provider 节内字段值类型错 | Pydantic `ValidationError`（type mismatch） | error | `ProviderTomlLoadError` · `ProviderTomlFieldTypeError` | 11 |
-| 11 | 字段值**硬越界**（`temperature = 3.0` / `api_host` 非 URL 格式） | Pydantic `ValidationError` | error | `ProviderTomlLoadError` · `ProviderTomlFieldValueError` | 11 |
-| 12 | `default_model` 不在该 provider 的 `models` 表 | 解析时找不到 | error | `ProviderTomlLoadError` · `ProviderTomlMissingModelError` | 11 |
-| 13 | provider 类的 langchain 不允许 `api_host` 覆盖（如 Bedrock via Converse） | langchain 异常 | error | `ProviderTomlLoadError` · `ProviderTomlHostNotAllowedError` | 11 |
-| 14 | 字段值**软越界**（`temperature > 1.5` 不超规但偏高；硬边界 = `[0.0, 2.0]`，见 #11） | Pydantic `ValidationError`（range） | **warning** | — | **0** |
-| 15 | `api_key` 空字符串——**C 档云端 provider**（21 个，见 §9.2 分档表） | — | **error** | `ProviderTomlLoadError` · `ProviderTomlFieldError` | **11** |
-| 16 | `api_key` 空字符串——**B 档**（`openai-compatible` / `xiaomi`，端点是否校验鉴权未知） | — | **warning** | — | **0** |
-| 17 | `api_key` 空字符串——**A 档本地 provider**（`ollama` / `meta`） | — | 无（合法） | — | — |
-| 18 | `api_host` = `"default"` 但 provider ≠ `ollama` | 解析层视为普通 URL | **warning** | — | **0** |
-| 19 | `bedrock` 凭据缺失（`aws_secret_access_key` 等 4 个 `aws_*` 字段为空） | `[bedrock]` 不用 `api_key` | **error** | `ProviderTomlLoadError` · `ProviderTomlFieldError` | **11** |
+| 1 | TOML 语法解析（任一 `.toml` 文件） | `tomllib.TOMLDecodeError` | error | `ProviderTomlLoadError` · `ProviderTomlSyntaxError` | 11 |
+| 2 | `providers/` 目录不存在 | — | error | `ProviderTomlLoadError` · `ProviderTomlFieldError` | 11 |
+| 3 | `providers/default.toml` 不存在 | — | error | `ProviderTomlLoadError` · `ProviderTomlFieldError` | 11 |
+| 4 | `default_provider` 缺失 / 为空串 | — | error | `ProviderTomlLoadError` · `ProviderTomlFieldError` | 11 |
+| 5 | `default_model` 缺失 / 为空串 | — | error | `ProviderTomlLoadError` · `ProviderTomlFieldError` | 11 |
+| 6 | `default_provider` ∉ 白名单 | 不在 v1 26 家 | error | `ProviderTomlLoadError` · `ProviderTomlScopeError` | 11 |
+| 7 | `default_provider` ∈ 永久黑名单 | v1 空集合（占位行） | error | `ProviderTomlLoadError` · `ProviderTomlScopeError` | 11 |
+| 8 | `default_provider` ∈ 暂不支持清单 | v1 阶段空集合（占位行） | error | `ProviderTomlLoadError` · `ProviderTomlScopeError` | 11 |
+| 9 | `default_provider` ∈ v2+ 候选（baidu / iflytek / sensetime） | v1 不支持 | error | `ProviderTomlLoadError` · `ProviderTomlScopeError` | 11 |
+| 10 | **provider 文件名 stem ∉ 白名单**（如 `providers/openai2.toml`） | v1 范围校验 | error | `ProviderTomlLoadError` · `ProviderTomlScopeError` | 11 |
+| 11 | `default_provider` 指向的 provider 文件**不存在** | 跨文件校验 | error | `ProviderTomlLoadError` · `ProviderTomlFieldError` | 11 |
+| 12 | `default_provider` 指向的 provider 文件 **`enabled = false`** | 跨文件校验 | error | `ProviderTomlLoadError` · `ProviderTomlFieldError` | 11 |
+| 13 | **零 enabled provider**（`providers/` 下无任何 `enabled = true` 的文件） | — | error | `ProviderTomlLoadError` · `ProviderTomlFieldError` | 11 |
+| 14 | `enabled` 字段类型错（如 `enabled = "yes"`） | Pydantic `ValidationError`（type mismatch） | error | `ProviderTomlLoadError` · `ProviderTomlFieldTypeError` | 11 |
+| 15 | provider 文件内字段拼写错误（**enabled 文件**） | Pydantic `ValidationError`（unknown field） | error | `ProviderTomlLoadError` · `ProviderTomlFieldError` | 11 |
+| 16 | provider 文件内字段值类型错（**enabled 文件**） | Pydantic `ValidationError`（type mismatch） | error | `ProviderTomlLoadError` · `ProviderTomlFieldTypeError` | 11 |
+| 17 | 字段值**硬越界**（`temperature = 3.0` / `api_host` 非 URL 格式，**enabled 文件**） | Pydantic `ValidationError` | error | `ProviderTomlLoadError` · `ProviderTomlFieldValueError` | 11 |
+| 18 | `default_model` 不在 default provider 的 `[models]` 表 | 跨文件校验 | error | `ProviderTomlLoadError` · `ProviderTomlMissingModelError` | 11 |
+| 19 | provider 类的 langchain 不允许 `api_host` 覆盖（如 Bedrock via Converse） | langchain 异常 | error | `ProviderTomlLoadError` · `ProviderTomlHostNotAllowedError` | 11 |
+| 20 | 字段值**软越界**（`temperature > 1.5` 不超规但偏高；硬边界 = `[0.0, 2.0]`，见 #17，**enabled 文件**） | Pydantic `ValidationError`（range） | **warning** | — | **0** |
+| 21 | `api_key` 空字符串——**C 档云端 provider**（21 个，见 §9.2 分档表，**enabled 文件**） | — | **error** | `ProviderTomlLoadError` · `ProviderTomlFieldError` | **11** |
+| 22 | `api_key` 空字符串——**B 档**（`openai-compatible` / `xiaomi`，端点是否校验鉴权未知，**enabled 文件**） | — | **warning** | — | **0** |
+| 23 | `api_key` 空字符串——**A 档本地 provider**（`ollama` / `meta`，**enabled 文件**） | — | 无（合法） | — | — |
+| 24 | `api_host` = `"default"` 但 provider ≠ `ollama`（**enabled 文件**） | 解析层视为普通 URL | **warning** | — | **0** |
+| 25 | `bedrock` 凭据缺失（`aws_secret_access_key` 等 4 个 `aws_*` 字段为空，**enabled 文件**） | `bedrock` 不用 `api_key` | **error** | `ProviderTomlLoadError` · `ProviderTomlFieldError` | **11** |
+| 26 | **disabled 文件内的任何字段错误**（拼写 / 类型 / 越界 / 鉴权缺失） | `enabled = false` → 整份惰性 | **不校验** | — | — |
 
-> - **#15 空 `api_key` 在 C 档是 error（exit 11）**——实测 C 档（云端）空 key 100% 在**构造期**失败（§9.1.1），且报错文案指向 env var（违背 P-2）；而本地端点（Ollama / vLLM / LiteLLM）**本来就不校验鉴权**，一刀切会误伤本地场景 → 按 provider 分三档（#15 / #16 / #17）。
-> - **#16 B 档含 `xiaomi`**——多平台路由（OpenRouter 云端 / Ollama 本地），鉴权属性由用户选的平台决定，服务端是否校验**运行时才知道** → 与 `openai-compatible` 同档（warning + 占位符），不按 C 档硬错处理。
-> - **#7 的子类名统一**——v2+ 候选不设独立错误类，归入 `ProviderTomlScopeError`（见 §7.3）。
+> - **#15-#25 只对 `enabled = true`（或缺省）的 provider 文件生效**——`enabled = false` 的文件完全惰性（#26）；**唯一例外**是 #10（文件名 stem 的 scope 校验对**所有**文件生效，防拼错文件名）。
+> - **#13 零 enabled = error**（不是 warning）——"启用哪个 provider / 用哪个 model 作默认"必须由用户决策（§11.2 奥卡姆原则）；副作用是 `donkey init` 产物**不再** 100% 通过静态检查（AC-1 静态口径随之修订，见 `harness/features/立项书.md §3.2.3`），错误消息承担"配置教程"职责。
+> - **#21 空 `api_key` 在 C 档是 error（exit 11）**——实测 C 档（云端）空 key 100% 在**构造期**失败（§9.1.1），且报错文案指向 env var（违背 P-2）；而本地端点（Ollama / vLLM / LiteLLM）**本来就不校验鉴权**，一刀切会误伤本地场景 → 按 provider 分三档（#21 / #22 / #23）。
+> - **#22 B 档含 `xiaomi`**——多平台路由（OpenRouter 云端 / Ollama 本地），鉴权属性由用户选的平台决定，服务端是否校验**运行时才知道** → 与 `openai-compatible` 同档（warning + 占位符），不按 C 档硬错处理。
+> - **#9 的子类名统一**——v2+ 候选不设独立错误类，归入 `ProviderTomlScopeError`（见 §7.3）。
 
-> **对应 README §3.2**：上表 1-13 是 exit 11（`ProviderTomlLoadError` 伞形）的具体子场景。
+> **对应 README §3.2**：上表 1-19 是 exit 11（`ProviderTomlLoadError` 伞形）的具体子场景。
 
 ### 11.2 警告 vs 错误的边界
 
 | 类别 | 严重度 | F002 load 行为 | exit code |
 |---|---|---|---|
-| **`provider.toml` 配置 hard error**（TOML parse / 字段拼写 / 字段类型 / 字段值硬越界 / scope 不在白名单） | error | exit 11，阻止 load | **11** |
+| **`providers/` 配置 hard error**（TOML parse / 字段拼写 / 字段类型 / 字段值硬越界 / scope 不在白名单 / 零 enabled provider / 默认项跨文件不一致） | error | exit 11，阻止 load | **11** |
 | **其它配置文件 hard error**（`mcp.json` 解析失败 / `SKILL.md` frontmatter 错） | error | exit 12 / 13，阻止 load | 12 / 13 |
 | **`instruction.md` 缺失 / 模型连通 / sqlite schema** | error | exit 14 / 15 / 16，阻止 load | 14 / 15 / 16 |
 | **`tools/*.py` / `SKILL.md` 加载 / `MCP` server** | error | exit 17 / 18 / 19，阻止 load | 17 / 18 / 19 |
@@ -2231,20 +2551,22 @@ openai-compatible **没有"官方 endpoint"**——用户必须显式告诉解�
 
 ### 12.1 UI 结构
 
-Web UI 应按以下结构渲染 `provider.toml`：
+Web UI 应按以下结构渲染 `providers/` 目录（**一个 tab = 一个文件**）：
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│  模型配置 (provider.toml)                              │
+│  模型配置 (providers/)                                  │
 ├────────────────────────────────────────────────────────┤
-│  [全局]                                                │
-│    默认 provider:  [openai ▼]                          │
+│  [全局]  ← 写回 providers/default.toml                │
+│    默认 provider:  [openai ▼]  ← 只列 enabled 的 provider│
 │    默认 model:    [gpt-4o        ▼]  ← 动态从 provider 拉 │
 ├────────────────────────────────────────────────────────┤
 │  [Provider Tabs]                                       │
 │    [OpenAI] [Anthropic] [Google] [Ollama] [...]        │
+│    （tab 上的 ⏻ = 文件里的 enabled 开关）                │
 │                                                        │
-│  当前 tab: OpenAI                                      │
+│  当前 tab: OpenAI  ← 写回 providers/openai.toml        │
+│    ⏻ 启用:        [ON ]                                │
 │    api_key:         [••••••]   [显示]  [清空]          │
 │    api_host:        [          ]   [使用默认]           │
 │    openai_organization: [                              ]│
@@ -2263,6 +2585,9 @@ Web UI 应按以下结构渲染 `provider.toml`：
 └────────────────────────────────────────────────────────┘
 ```
 
+> **toggle 与文件的对应关系**：UI 上的 provider 开关 ⏻ **就是** 文件里的 `enabled` 字段（§8.1 字段 0）——UI 不引入第二套状态，落盘即事实来源（single source of truth）。
+> **disabled provider 的 UI 行为**：tab 保留但置灰；字段只读（不触发后端 schema 校验，因为 disabled 文件完全惰性，§7.3）；`[测试连接]` 按钮禁用。
+
 ### 12.2 关键功能
 
 | 功能 | 实现要点 |
@@ -2273,11 +2598,14 @@ Web UI 应按以下结构渲染 `provider.toml`：
 | **模型动态列表** | `api_host` 填好后，"添加模型"按钮触发后端调用 provider 列表 API（OpenAI `/v1/models`） |
 | **测试连接** | 后端组装配置（仅 TOML 字段，不读 env var）→ `init_chat_model.invoke("ping")` → 返回结果 |
 | **显示生效配置** | 展示"环境变量解析后"的最终配置（仅供 debug；本项目**不读 env var**，所以"生效配置" = TOML 原文） |
-| **批量保存** | 修改完所有 tab 后，"保存"按钮写回 `provider.toml`；原子写入（写临时文件 + `os.replace`） |
+| **批量保存** | 修改完所有 tab 后，"保存"按钮**按文件分别写回** `providers/<id>.toml`（每个文件原子写入：写临时文件 + `os.replace`）+ `providers/default.toml`；**未改动的文件不重写**（避免无谓 diff / 破坏用户手写注释） |
+| **新增 provider** | 写 `providers/<id>.toml`（内容取自该 provider 的 stub 模板）；文件名必须是白名单 id，否则拒绝 |
+| **启用 / 停用 provider** | 改写该文件的 `enabled` 字段；停用后 UI 立即置灰且不再要求 `api_key` |
+| **目录快照** | 顶部展示"已配置 N 家 / 已启用 M 家 / 白名单共 26 家"（数据来自 `providers/` 目录 + 引擎侧白名单） |
 
 ### 12.3 字段 help_text
 
-每个字段在 UI 上挂 tooltip，文本来自 TOML 注释（§8 全局模板中的 `#` 注释）。**§8 的注释即 UI 的 help_text 单一来源**。
+每个字段在 UI 上挂 tooltip，文本来自 TOML 注释（§8.3 目录模板中的 `#` 注释）。**§8.3 的注释即 UI 的 help_text 单一来源**（每个 provider 文件的注释只服务该 provider 的 tab）。
 
 ### 12.4 不应做的
 
@@ -2295,9 +2623,9 @@ Web UI 应按以下结构渲染 `provider.toml`：
 
 | 场景 | 安全要求 |
 |---|---|
-| **TOML 文件权限** | `chmod 600 provider.toml`（仅 owner 可读写），`donkey init` 生成后自动设置 |
-| **git 跟踪** | `provider.toml` **默认入 git**（P-2 明文策略）；用户在 README / .gitignore 中明确说明风险 |
-| **团队共享** | 团队共享 `provider.toml.example`（含 `api_key = "REPLACE_ME"`），真实 key 通过密钥管理工具分发 |
+| **TOML 文件权限** | `chmod 600 providers/*.toml`（仅 owner 可读写），`donkey init` 生成后自动设置（含 `providers/` 目录本身 `chmod 700`） |
+| **git 跟踪** | `providers/` **默认入 git**（P-2 明文策略）；用户在 README / .gitignore 中明确说明风险 |
+| **团队共享** | 团队共享 `providers/*.example.toml`（含 `api_key = "REPLACE_ME"`），真实 key 通过密钥管理工具分发 |
 | **Web 提交** | 强制 HTTPS；后端不打印 api_key 到日志 |
 | **异常 traceback** | api_key / api_secret 等敏感字段在 `__repr__` 中脱敏（参考 pydantic `SecretStr`） |
 
@@ -2315,11 +2643,11 @@ Web UI 应按以下结构渲染 `provider.toml`：
 
 > **风险声明（README 中必须含）**：
 >
-> 本项目 `provider.toml` 文件以**明文**存储各 provider 的 API key。若用户将 workspace 整体上传到公开 git 仓库 / 共享链接 / 截图泄露 / 备份到云盘等，**API key 可能泄露并被滥用**。**用户自负全部责任**。
+> 本项目 `providers/*.toml` 文件以**明文**存储各 provider 的 API key。若用户将 workspace 整体上传到公开 git 仓库 / 共享链接 / 截图泄露 / 备份到云盘等，**API key 可能泄露并被滥用**。**用户自负全部责任**。
 >
 > 缓解措施：
-> 1. 仅在私有 git 仓库 / 受控环境存储 `provider.toml`；
-> 2. 团队协作时使用 `provider.toml.example` 模板 + 单独分发真实 key；
+> 1. 仅在私有 git 仓库 / 受控环境存储 `providers/` 目录；
+> 2. 团队协作时使用 `providers/*.example.toml` 模板 + 单独分发真实 key；
 > 3. 在云 provider（OpenAI / Anthropic 等）控制台为 key 设置 IP 白名单 / 用量上限 / 失效策略；
 > 4. 定期轮换 API key。
 >
@@ -2376,12 +2704,12 @@ Web UI 应按以下结构渲染 `provider.toml`：
 |---|---|---|---|
 | 1. 添加 provider 解析类 | 1–4 小时 | 2–7 人日 | `donkey/core/llm/providers/<id>.py` |
 | 2. 添加 schema（Pydantic Model） | 1–2 小时 | 1–2 天 | `donkey/core/llm/schema/<id>.py` |
-| 3. 添加 TOML 模板节到 `donkey init` 生成器 | 30 分钟 | 30 分钟 | `donkey/core/workspace/templates/provider.toml.txt` |
+| 3. 添加 TOML 模板文件到 `donkey init` 生成器 | 30 分钟 | 30 分钟 | `donkey/core/workspace/templates/providers/<id>.toml.txt` |
 | 4. 添加 provider 列表到 `donkey init` UI 提示 | 30 分钟 | 30 分钟 | README / Web UI |
 | 5. 添加 F002 load 校验规则 | 30 分钟 | 30 分钟 | `donkey/core/llm/schema/loader.py` |
 | 6. 添加 provider profile 元数据（可选） | 1 小时 | 1 小时 | `donkey/core/llm/protocol_defaults.py` |
 | 7. 添加单元测试 + verify 脚本 | 2–4 小时 | 3–5 天 | `tests/unit/test_<id>.py` + `tests/integration/test_init_to_load.py` |
-| 8. 更新 §3.1 白名单 + §8 全局模板 | 30 分钟 | 30 分钟 | `harness/report/大模型toml参数设计.md` |
+| 8. 更新 §3.1 白名单 + §8.3 目录模板 | 30 分钟 | 30 分钟 | `harness/report/大模型toml参数设计.md` |
 
 **总工作量估算（v1 仅 ReusableProvider）**：
 - **ReusableProvider（复用 LangChain 类）**：1–2 人日（典型 OpenAI 兼容 provider）
@@ -2530,7 +2858,7 @@ class ReusableProvider(ABC):
 
     适用于 openai / anthropic / google / ollama / xai / mistral / bedrock /
     groq / fireworks / together / cohere / perplexity / databricks / cerebras
-    / deepseek / qwen / kimi / openrouter / doubao / zhipu / MiniMax /
+    / deepseek / qwen / kimi / openrouter / doubao / zhipu / minimax /
     tencent / stepfun / xiaomi / meta / openai-compatible 共 26 个 provider。
 
     这些 provider 的请求 / 响应 / 流式解析已由 LangChain 内部完成，
@@ -2572,6 +2900,8 @@ class OpenAIProvider(ReusableProvider):
             timeout=params.get("timeout", 60),
             max_retries=params.get("max_retries", 6),
             # ChatOpenAI 自动处理 o-series max_tokens → max_completion_tokens 转换
+            # 流式下统一开 stream_usage —— 跨 provider 的 usage_metadata 行为一致（实测见 §5.2）
+            stream_usage=bool(params.get("stream", True)),
         )
 ```
 
@@ -2596,6 +2926,9 @@ class QwenProvider(ReusableProvider):
             max_tokens=params.get("max_tokens"),
             timeout=params.get("timeout", 60),
             max_retries=params.get("max_retries", 6),
+            # 流式下统一开 stream_usage —— MiniMax 兼容端点默认返回 "usage": null，
+            # 不开则应用层拿不到 usage_metadata（实测见 §5.2 usage 行）
+            stream_usage=bool(params.get("stream", True)),
         )
 
 
@@ -2632,6 +2965,9 @@ class QwenThinkingProvider(ReusableProvider):
             max_tokens=params.get("max_tokens"),
             timeout=params.get("timeout", 60),
             max_retries=params.get("max_retries", 6),
+            # 流式下统一开 stream_usage —— MiniMax 兼容端点默认返回 "usage": null，
+            # 不开则应用层拿不到 usage_metadata（实测见 §5.2 usage 行）
+            stream_usage=bool(params.get("stream", True)),
         )
 
 
@@ -2657,6 +2993,9 @@ class QwenGeneralThinkingProvider(ReusableProvider):
             max_tokens=params.get("max_tokens"),
             timeout=params.get("timeout", 60),
             max_retries=params.get("max_retries", 6),
+            # 流式下统一开 stream_usage —— MiniMax 兼容端点默认返回 "usage": null，
+            # 不开则应用层拿不到 usage_metadata（实测见 §5.2 usage 行）
+            stream_usage=bool(params.get("stream", True)),
         )
 
 
@@ -2701,6 +3040,8 @@ class DeepSeekProvider(ReusableProvider):
             max_retries=params.get("max_retries", 6),
             # DeepSeek-R1 用 reasoning_effort 控制推理深度
             reasoning_effort=params.get("reasoning_effort"),
+            # 流式下统一开 stream_usage —— 跨 provider 的 usage_metadata 行为一致（实测见 §5.2）
+            stream_usage=bool(params.get("stream", True)),
         )
 
 # 注意：禁止走 ChatOpenAI + base_url
@@ -2709,7 +3050,7 @@ class DeepSeekProvider(ReusableProvider):
 ```
 
 ```python
-# donkey/core/llm/providers/reusable/MiniMax.py
+# donkey/core/llm/providers/reusable/minimax.py
 from langchain_anthropic import ChatAnthropic
 from donkey.core.llm.providers.base import ReusableProvider
 
@@ -2722,7 +3063,7 @@ class MiniMaxProvider(ReusableProvider):
     AIMessage.content，应用层可用正则提取。
     """
 
-    provider_id = "MiniMax"
+    provider_id = "minimax"
     default_api_host = "https://api.minimaxi.com/v1"  # Coding Plan OpenAI 兼容端点
 
     def build_chat_model(self, model: str, **params) -> ChatOpenAI:
@@ -2734,6 +3075,9 @@ class MiniMaxProvider(ReusableProvider):
             max_tokens=params.get("max_tokens", 4096),
             timeout=params.get("timeout", 60),
             max_retries=params.get("max_retries", 6),
+            # 流式下统一开 stream_usage —— MiniMax 兼容端点默认返回 "usage": null，
+            # 不开则应用层拿不到 usage_metadata（实测见 §5.2 usage 行）
+            stream_usage=bool(params.get("stream", True)),
         )
 
 # 关键事实：
@@ -2873,7 +3217,7 @@ PROVIDER_REGISTRY = {
     # 中文 OpenAI 兼容（4）
     "doubao": DoubaoProvider,
     "zhipu": ZhipuProvider,
-    "MiniMax": MiniMaxProvider,                # ChatOpenAI + base_url（OpenAI 兼容 + Coding Plan sk-cp- 密钥）
+    "minimax": MiniMaxProvider,                # ChatOpenAI + base_url（OpenAI 兼容 + Coding Plan sk-cp- 密钥）
     "tencent": TencentProvider,
     "stepfun": StepFunProvider,
     "xiaomi": XiaomiProvider,                   # 多平台路由
@@ -2892,6 +3236,90 @@ def get_provider(provider_id: str) -> ReusableProvider:
     return PROVIDER_REGISTRY[provider_id]()
 ```
 
+### 15.5 目录加载器（`providers/` 扫描 → 内存配置）
+
+> v1 的 loader 从"读 1 个文件"变成"扫 1 个目录"——**顺序、惰性、跨文件校验**三件事必须写死，否则同一份 workspace 在不同机器上行为不一致。
+
+```python
+# donkey/core/llm/schema/loader.py
+from pathlib import Path
+import tomllib
+
+GLOBAL_FILE = "default.toml"        # 保留名：providers/default.toml
+
+
+def load_provider_dir(providers_dir: Path) -> WorkspaceProviders:
+    """扫描 providers/ 目录 → 逐 provider 配置 + 全局默认（§7.2 加载顺序）。"""
+    if not providers_dir.is_dir():
+        raise ProviderTomlFieldError(f"providers 目录不存在：{providers_dir}")
+
+    # --- 1. 全局默认（providers/default.toml）-----------------------------
+    global_path = providers_dir / GLOBAL_FILE
+    if not global_path.is_file():
+        raise ProviderTomlFieldError(f"缺少 {GLOBAL_FILE}")
+    g = _parse_toml(global_path)                      # 语法错 → ProviderTomlSyntaxError
+    default_provider = g.get("default_provider", "")
+    default_model = g.get("default_model", "")
+    # 空串 / 缺失 → ProviderTomlFieldError（exit 11；见 §7.3）
+
+    # --- 2. 扫描 provider 文件 ---------------------------------------------
+    sections: dict[str, ProviderSection] = {}
+    for path in sorted(providers_dir.glob("*.toml")):
+        if path.name == GLOBAL_FILE:
+            continue
+        provider_id = path.stem                        # 文件名 stem == provider_id
+        check_v1_scope(provider_id)                   # 未知 stem → ProviderTomlScopeError
+        raw = _parse_toml(path)                        # 语法错 → ProviderTomlSyntaxError
+
+        enabled = raw.get("enabled", True)            # 缺省 true
+        if not isinstance(enabled, bool):
+            raise ProviderTomlFieldTypeError(f"{path.name}: enabled 必须是 bool")
+
+        if not enabled:
+            # enabled = false → 整份惰性：不做字段校验、不要求 api_key
+            continue
+
+        schema_cls = PROVIDER_SCHEMAS.get(provider_id)
+        if schema_cls is None:
+            raise ProviderTomlFieldError(f"{path.name}: per-provider schema 尚未实现")
+        section = schema_cls.model_validate(raw)      # 拼写 / 类型 / 越界 → exit 11
+        section.api_key = load_api_key(raw)            # 缺失 → ""（绝不 None，§9.1.1）
+        _check_api_key_tier(provider_id, section, path)   # 三档校验（§9.2）
+        sections[provider_id] = section
+
+    # --- 3. 跨文件校验（全局默认 ↔ provider 文件）--------------------------
+    if not sections:
+        raise ProviderTomlFieldError(
+            "providers/ 下没有任何启用的 provider —— 请把某个 providers/<id>.toml 的 "
+            "enabled 改为 true，并在 providers/default.toml 填 default_provider / default_model"
+        )
+    if default_provider not in sections:
+        raise ProviderTomlFieldError(
+            f"default_provider='{default_provider}' 对应的 providers/{default_provider}.toml "
+            f"不存在或未启用"
+        )
+    if default_model not in sections[default_provider].models:
+        raise ProviderTomlMissingModelError(
+            f"default_model='{default_model}' 不在 providers/{default_provider}.toml 的 [models] 表中"
+        )
+
+    return WorkspaceProviders(
+        sections=sections,
+        default_provider=default_provider,
+        default_model=default_model,
+    )
+```
+
+**加载器不变量**：
+
+| # | 不变量 |
+|---|---|
+| 1 | **遍历顺序确定**——`sorted(glob("*.toml"))`，保证多文件错误时"报哪个文件"在所有机器上一致 |
+| 2 | **惰性短路**——`enabled = false` 的文件在 schema 校验**之前**就被跳过（`continue`），不产生任何错误 |
+| 3 | **scope 校验不可跳过**——`check_v1_scope` 在惰性短路**之前**执行（防拼错文件名） |
+| 4 | **错误消息带路径**——所有抛错都带 `providers/<file>.toml` 前缀 |
+| 5 | **不读 env var**——`api_key` 缺失一律 `""`（§9.1.1） |
+
 ---
 
 ## 16. 决策速查表
@@ -2899,25 +3327,30 @@ def get_provider(provider_id: str) -> ReusableProvider:
 | # | 问题 | 结论 | 理由 |
 |---|---|---|---|
 | **Q-1** | TOML schema 形状 | **每个 provider 独立 schema**（无统一 `[provider]` 顶层表） | P-1；字段语义清晰；解析严谨 |
+| **Q-1.1** | 配置**文件**布局 | **`providers/` 目录 + 一 provider 一文件**（`providers/<provider_id>.toml`，文件名 stem == provider_id，小写 kebab-case）+ `providers/default.toml`（全局 `default_provider` / `default_model`）；**取代 v0 草案的单文件 `provider.toml` + 26 个 provider 节** | P-6；文件边界 = schema 边界；目录列表即「支持哪些供应商」；provider 增删改 = 单文件 diff；错误可定位到文件 |
+| **Q-1.2** | per-provider 开关 | **每个 provider 文件含 `enabled` 字段**（缺省 `true`；`false` = **完全惰性**：不校验字段 / 不要求 `api_key` / 不参与连通性检查，仅保留文件名 stem 的 scope 校验） | P-7；对齐 Cherry Studio toggle；免掉 `REPLACE_ME` 占位符 hack；「暂存配置」不阻塞 load |
 | **Q-2** | 鉴权方式 | **`api_key` 仅 TOML 明文，不读环境变量** | P-2；workspace 跨 OS 行为一致；用户自负 |
-| **Q-3** | `api_host` 必填性 | **对 23 个 provider 选填；`openai-compatible` / `meta` / `databricks` 必填**（MiniMax 有合理默认 `api.minimaxi.com/v1`，但允许覆盖为 Anthropic SDK 端点）| P-3；Ollama 小白用户友好（26 − 3 = **23**）|
-| **Q-4** | `api_host = "default"` | **仅 ollama 解析为官方默认 URL；其它 provider 视为普通 URL**（并出 **warning**，exit 0，见 §11.1 #18） | 字段语义统一；Ollama 友好 |
+| **Q-3** | `api_host` 必填性 | **对 23 个 provider 选填；`openai-compatible` / `meta` / `databricks` 必填**（minimax 有合理默认 `api.minimaxi.com/v1`，但允许覆盖为 Anthropic SDK 端点）| P-3；Ollama 小白用户友好（26 − 3 = **23**）|
+| **Q-4** | `api_host = "default"` | **仅 ollama 解析为官方默认 URL；其它 provider 视为普通 URL**（并出 **warning**，exit 0，见 §11.1 #24） | 字段语义统一；Ollama 友好 |
 | **Q-5** | Provider 白名单 | **v1 = 26 家硬限**（OpenAI / Anthropic / Google / Meta / xAI / Mistral / Qwen / DeepSeek / Doubao / Kimi / Zhipu / MiniMax / Tencent / StepFun / Xiaomi / Bedrock / Groq / Fireworks / Together / Cohere / Perplexity / Databricks / Cerebras / OpenRouter / OpenAI-Compatible / Ollama）；**v2+ 候选 3 家**（Baidu / iFlytek / SenseTime）见 §3.5 | P-4；不为冷僻 provider 写代码 |
 | **Q-6** | Provider 范围治理 | **v1 范围内无永久黑名单成员 / 无暂不支持清单成员**——按 §3.0 Provider 治理原则（最高优先级），本项目对所有 provider **一视同仁**，仅技术可行性 / 维护成本 / 生态适配度可作为入选 / 排除 / 列入黑名单的依据；Maintainer 个人立场 / 政治 / 地缘偏好**绝不**构成黑名单"硬理由"；任何入列决策必须分别走 §13.4 / §14.7 流程（GitHub issue 公开硬理由 + 社区评审 ≥14 天）。 | P-4 + §3.0 + §13.4 / §14.7 流程；详见 §3.0 |
 | **Q-7** | 字段拼写错误 | **F002 load 立即报错（exit 11）** | P-5；不延迟到运行时 |
 | **Q-8** | `[provider.extra]` 透传 | **不采用** | P-5；解析严谨 > 灵活 |
-| **Q-9** | warning vs error | **`provider.toml` 任何"硬错" = error（伞形 `ProviderTomlLoadError` → exit 11；细分 7 个子类详见 §7.3 + §11.1）；warning 仅限字段值软越界 / B 档（`openai-compatible` / `xiaomi`）`api_key` 缺失 / `api_host=default` 非 ollama 等软问题 → exit 0；详见 §11.2 + `README §3.2.1`** | 区分"硬错"与"软问题"；与 README §3.2.1 严格 1:1 |
+| **Q-9** | warning vs error | **`providers/` 任何"硬错" = error（伞形 `ProviderTomlLoadError` → exit 11；细分 7 个子类详见 §7.3 + §11.1）；warning 仅限字段值软越界 / B 档（`openai-compatible` / `xiaomi`）`api_key` 缺失 / `api_host=default` 非 ollama 等软问题 → exit 0；详见 §11.2 + `README §3.2.1`** | 区分"硬错"与"软问题"；与 README §3.2.1 严格 1:1 |
 | **Q-9.1** | LangChain 运行时异常 → exit code | **F004 段位归属**：retryable 错误（429/5xx/网络/超时/400 请求格式错）→ exit 83 (`ModelRetryMiddlewareError`)；auth 错误（401/403/404 + **构造期 Missing credentials**）→ exit 90 (`ModelAuthenticationError`)；输入超限（`ContextOverflowError`）→ exit 85 (`ModelCallLimitMiddlewareError`)；详见 §4.3.1 + `README §3.4.1`（400 统一为 83）| 与 README §3.4.1 严格 1:1 |
-| **Q-10** | 三层架构 | **网络层透传 + 解析层严谨 + 应用层抽象** | §2；与 LangChain 解耦清晰 |
-| **Q-11** | Web UI | **每个 provider 一 tab + 鉴权隐藏 + api_host 默认值提示 + 测试连接** | §12；用户友好 |
+| **Q-10** | 三层架构 | **网络层透传 + 解析层严谨 + 应用层抽象**；v1 归属：**网络层 = LangChain 的 httpx 客户端、解析层 = LangChain 各 provider 包（零自研）、应用层 = donkey 薄壳**——donkey 自研仅"配置层严格校验" | §2（首表 = v1 归属）；语义与 LangChain 解耦清晰 |
+| **Q-11** | Web UI | **每个 provider 一 tab（一 tab = 一文件）+ 启用开关（= `enabled` 字段）+ 鉴权隐藏 + api_host 默认值提示 + 测试连接**；保存时**按文件分别原子写回** `providers/<id>.toml` | §12；用户友好；UI 状态与文件状态同源 |
 | **Q-12** | 是否能用 LangChain 实现 | **v1 100% 能**：26/26 v1 provider 复用 LangChain 官方类（**14 个独立类 + 8 个 ChatOpenAI+base_url + 1 个 ChatOpenRouter + 2 个多平台路由 + 1 个 ChatDeepSeek**；另有 3 个推理模型替代类 [ChatQwQ / ChatQwen / ChatMoonshot] 不额外计 provider）；**v2+ 候选 3 家**（baidu / iflytek / sensetime）推迟自研 | §3.2 / §15 / §14.6 |
-| **Q-13** | 仿效对象 | **Cherry Studio**（per-provider schema + 鉴权明文 + models 列表） | §1.4 |
+| **Q-13** | 仿效对象 | **Cherry Studio**（per-provider schema + 鉴权明文 + models 列表 + **per-provider 开关**） | §1.4 |
 | **Q-14** | 未来扩展 | **新增 provider 1–2 人日；新增白名单成员走 §14.2 流程；新增黑名单成员走 §14.3 流程** | §14 |
+| **Q-15** | 全局默认放哪 | **`providers/default.toml`**（保留名）存 `default_provider` + `default_model`；`default_model` 必须存在于该 provider 文件的 `[models]` 表（跨文件校验 → exit 11） | 与 per-provider 文件同处一个目录，workspace 根目录保持最小；跨文件一致性由 loader 强制 |
+| **Q-16** | 「没配置任何 provider」算不算错 | **算硬错（exit 11）**——`providers/` 下零 enabled provider 即报错，错误消息给出三步配置指引 | 「启用哪个 provider / 用哪个 model 作默认」必须由用户决策（§11.2 奥卡姆原则）；副作用：`donkey init` 产物**不再** 100% 通过静态检查（AC-1 静态口径修订，见立项书 §3.2.3） |
+| **Q-17** | 同一 provider 能否配多份 | **v1 不支持**——文件名 stem 唯一（`providers/<id>.toml`）；Cherry Studio 的「多实例」（如公司版 / 个人版 OpenAI 并存）列入 v2 议题（届时引入 `providers/<id>__<alias>.toml` 之类别名规则） | v1 简化；避免 `default_provider` 指向歧义 |
 
 ---
 
 ## 17. 一句话总结
 
-> **仿效 Cherry Studio 的 per-provider schema + 明文鉴权，每个 provider 一个独立 TOML schema；`api_key` 仅 TOML 明文（不读环境变量，保证 workspace 跨 OS 行为一致）；`api_host` 23 个 provider 选填（Ollama 允许 `"default"` 特殊值；`openai-compatible` / `meta` / `databricks` 必填）；v1 provider 白名单硬限 26 家 + §3.0 Provider 治理原则（最高优先级，对所有 provider 一视同仁，仅技术维度可作为入选 / 排除依据；v1 范围内永久黑名单与暂不支持清单**均为空**）+ baidu / iflytek / sensetime 推迟到 v2+；v1 100% 复用 LangChain 官方类（14 个独立类 + 8 个 ChatOpenAI+base_url 薄包装含 MiniMax-Coding-Plan + 1 个 ChatOpenRouter 元 provider + 2 个多平台路由 + 1 个 ChatDeepSeek = 26；另有 3 个推理模型替代类 [ChatQwQ / ChatQwen / ChatMoonshot] 不额外计 provider），零自研解析；含推理模型的 provider 走专用 LangChain 类（DeepSeek / ChatQwQ-for-QwQ / ChatQwen-for-Qwen3 + 显式 enable_thinking / Moonshot / OpenRouter）保留 reasoning_content；MiniMax-M3 走 `ChatOpenAI + base_url`（Coding Plan 主流用法），`<think>` 标签在 `content` 内保留；[bedrock] 改用独立 `aws_access_key_id` / `aws_secret_access_key` / `aws_region` 字段 + `boto3.Session(...)` 显式构造（与 §9.1 不读 env var 立场完全对齐）；TOML loader 把 `api_key` 缺失映射为 `""`（绝不返回 `None`），否则 LangChain 内部 env var 回退会"背叛立场"；exit 11 由伞形 `ProviderTomlLoadError` 承载（覆盖 7 种子错如 ProviderTomlSyntaxError / ProviderTomlFieldError / ProviderTomlScopeError 等，统一映射同一 exit 11，子类在 traceback 中可区分）；LangChain 运行时异常按"修复动作合并"原则 → retryable 错误（429/5xx/网络/超时/**400**）exit 83 (`ModelRetryMiddlewareError`) / auth 错误（401/403/404/**构造期 Missing credentials**）exit 90 (`ModelAuthenticationError`) / 输入超限（`ContextOverflowError`）exit 85 (`ModelCallLimitMiddlewareError`)**。网络层透传、应用层抽象 LangChain ——"传输的时候要透传，解析的时候要严谨"。**
+> **仿效 Cherry Studio 的 per-provider schema + 明文鉴权 + per-provider 开关；配置布局 = `providers/` 目录 + 一 provider 一文件（`providers/<provider_id>.toml`，文件名 stem == provider_id，小写 kebab-case）+ `providers/default.toml`（全局 `default_provider` / `default_model`），每个 provider 文件带 `enabled` 开关（缺省 true；false = 完全惰性：免掉 `REPLACE_ME` 占位符 hack，禁用的 provider 不要求填 `api_key`）；每个 provider 一个独立 TOML schema；`api_key` 仅 TOML 明文（不读环境变量，保证 workspace 跨 OS 行为一致）；`api_host` 23 个 provider 选填（Ollama 允许 `"default"` 特殊值；`openai-compatible` / `meta` / `databricks` 必填）；v1 provider 白名单硬限 26 家 + §3.0 Provider 治理原则（最高优先级，对所有 provider 一视同仁，仅技术维度可作为入选 / 排除依据；v1 范围内永久黑名单与暂不支持清单**均为空**）+ baidu / iflytek / sensetime 推迟到 v2+；v1 100% 复用 LangChain 官方类（14 个独立类 + 8 个 ChatOpenAI+base_url 薄包装含 MiniMax-Coding-Plan + 1 个 ChatOpenRouter 元 provider + 2 个多平台路由 + 1 个 ChatDeepSeek = 26；另有 3 个推理模型替代类 [ChatQwQ / ChatQwen / ChatMoonshot] 不额外计 provider），零自研解析；含推理模型的 provider 走专用 LangChain 类（DeepSeek / ChatQwQ-for-QwQ / ChatQwen-for-Qwen3 + 显式 enable_thinking / Moonshot / OpenRouter）保留 reasoning_content；MiniMax-M3 走 `ChatOpenAI + base_url`（Coding Plan 主流用法），`<think>` 标签在 `content` 内保留；`providers/bedrock.toml` 改用独立 `aws_access_key_id` / `aws_secret_access_key` / `aws_region` 字段 + `boto3.Session(...)` 显式构造（与 §9.1 不读 env var 立场完全对齐）；TOML loader 把 `api_key` 缺失映射为 `""`（绝不返回 `None`），否则 LangChain 内部 env var 回退会"背叛立场"；exit 11 由伞形 `ProviderTomlLoadError` 承载（覆盖 7 种子错如 ProviderTomlSyntaxError / ProviderTomlFieldError / ProviderTomlScopeError 等，统一映射同一 exit 11，子类在 traceback 中可区分）；LangChain 运行时异常按"修复动作合并"原则 → retryable 错误（429/5xx/网络/超时/**400**）exit 83 (`ModelRetryMiddlewareError`) / auth 错误（401/403/404/**构造期 Missing credentials**）exit 90 (`ModelAuthenticationError`) / 输入超限（`ContextOverflowError`）exit 85 (`ModelCallLimitMiddlewareError`)**。网络层透传、应用层抽象 LangChain ——"传输的时候要透传，解析的时候要严谨"。**
 >
-> **实测验证结论**：上述主张已由端到端 demo `harness/demo/about_providers/provider.py`（MiniMax-M3 + deepseek-v4-flash，63 项断言全绿）逐条验证——**核心主张全部成立**（per-provider schema / 严格 load 校验 / `<think>` 保留 / `ChatDeepSeek` 保留 `reasoning_content` 而 `ChatOpenAI` 丢弃 / exit code 映射）。
+> **实测验证结论**：上述主张已由端到端 demo `harness/demo/about_providers/provider.py`（minimax-M3 + deepseek-v4-flash，63 项断言全绿；目录化改造后 52 项离线断言重跑全绿）逐条验证——**核心主张全部成立**（per-provider schema + 一 provider 一文件 / `enabled` 惰性开关 / 严格 load 校验 / `<think>` 保留 / `ChatDeepSeek` 保留 `reasoning_content` 而 `ChatOpenAI` 丢弃 / exit code 映射）。

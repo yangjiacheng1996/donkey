@@ -6,16 +6,27 @@
 ======================  ==========================================  =========================
 provider_id             模型                                        LangChain 类
 ======================  ==========================================  =========================
-``MiniMax``             ``MiniMax-M3``                               ``ChatOpenAI + base_url``
+``minimax``             ``MiniMax-M3``                               ``ChatOpenAI + base_url``
 ``deepseek``            ``deepseek-v4-flash``                        ``ChatDeepSeek``（专用类）
 ======================  ==========================================  =========================
 
+配置布局（v1，设计文档 §7.1）::
+
+    providers/
+    ├── default.toml        # 保留名：default_provider + default_model
+    ├── minimax.toml        # enabled = true / false  ← per-provider 开关
+    └── deepseek.toml
+
 验证的设计文档条款：
 
-* §7.3 / §11.1 —— F002 load 阶段的 7 类硬错（拼写 / 类型 / 越界 / scope / 缺模型 …）
-* §8 / §8.3 —— per-provider 独立 schema + ``models`` 子表
+* §7.1-§7.3 / §11.1 —— F002 load 阶段的硬错（拼写 / 类型 / 越界 / scope / 缺模型 …）
+* §7.1-§7.3 / P-6 —— ``providers/`` 目录 + **一 provider 一文件**（文件名 stem == provider_id）
+* §7.3 / P-7 —— **``enabled`` 开关**：``false`` = 完全惰性（不校验字段 / 不要求 api_key）
+* §8 / §8.3 —— per-provider 独立 schema + ``models`` 子表（``[models.model_id]``）
 * §9.1 / §9.1.1 —— ``api_key`` 仅 TOML 明文，缺失归一化为 ``""``，**绝不回退 env var**
-* §9.2 —— ``api_key`` 空串 = warning（exit 0），不阻塞 load
+* §9.2 —— ``api_key`` 空串**按 provider 分三档**：A 档本地（合法，无 warning）/
+  B 档端点属性未知（合法 + warning + 解析层填占位符 "not-needed"）/
+  C 档云端（**硬错 exit 11**）
 * §10 —— ``api_host`` 全 provider 可选 + 解析层默认值
 * §3.2 / §5.3 —— 推理模型必须走专用类（``ChatDeepSeek`` 保留 ``reasoning_content``）
 * §3.6 / §3.6.5 —— MiniMax 走 OpenAI 兼容端点，``<think>`` 标签保留在 ``content``
@@ -27,10 +38,10 @@ provider_id             模型                                        LangChain 
     # 全量（离线校验 + 联网调用）
     .venv/bin/python harness/demo/about_providers/provider.py
 
-    # ⚠️ 默认的 provider.toml 是**脱敏版**（api_key = 占位符），联网用例会自动跳过；
-    #    要真跑请指向含真实密钥的 provider.local.toml（已 .gitignore）：
+    # ⚠️ 默认的 providers/ 是**脱敏版**（api_key = 占位符），联网用例会自动跳过；
+    #    要真跑请指向含真实密钥的 providers.local/（已 .gitignore）：
     .venv/bin/python harness/demo/about_providers/provider.py \
-        --config harness/demo/about_providers/provider.local.toml
+        --config harness/demo/about_providers/providers.local
 
     # 只跑 F002 load 阶段的离线校验（不发网络请求）
     .venv/bin/python harness/demo/about_providers/provider.py --offline
@@ -59,7 +70,8 @@ provider_id             模型                                        LangChain 
     langchain-openai 1.7.2 / langchain-deepseek 1.1.1 / openai 3.35.1 / pydantic 2.12.5
 
 ================================================================================
-验证结论（2026-10-20 实测：63 项断言全绿 / 0 FAIL / 0 SKIP）
+验证结论（2026-10-21 实测：**71 项断言全绿 / 0 FAIL / 0 SKIP**（在线，含两个真实模型）；
+          离线部分：52 项**离线**断言全绿 / 0 FAIL / 0 SKIP）
 ================================================================================
 
 【结论成立 —— 可直接进 v1 实现】
@@ -75,57 +87,66 @@ provider_id             模型                                        LangChain 
    （``_resolve_gateway_config`` 走 ``api_key is not None`` 分支，不读 env var）。
 4. §7.3 / §11.1 —— 7 类子错误全部可在 **F002 load 阶段**触发并统一映射 exit 11
    （案例 A02~A17）。
-5. §3.1 —— 白名单 26 个 provider_id、``langchain.chat_models.base._BUILTIN_PROVIDERS``
+5. **§7.1-§7.3 / P-6 / P-7（v1 目录化改造）——成立**。``providers/`` 目录 +
+   一 provider 一文件（文件名 stem == provider_id）+ 每文件 ``enabled`` 开关：
+   ① ``enabled = false`` 的文件**完全惰性**（字段拼写错也不报错，案例 A24）；
+   ② 零 enabled provider → exit 11（案例 A24）；
+   ③ default_provider 指向已禁用 / 不存在的文件 → exit 11（案例 A25 / A26）；
+   ④ 文件名大小写不一致（``providers/MiniMax.toml``）→ scope error exit 11（案例 A27）；
+   ⑤ 未知 stem（``providers/foo_ai.toml``）→ scope error exit 11（案例 A06 / A07）。
+6. §3.1 —— 白名单 26 个 provider_id、``langchain.chat_models.base._BUILTIN_PROVIDERS``
    实测 30 个、``"google"`` 不在其中且 ``init_chat_model(model_provider="google")``
    抛 ``ValueError``（案例 A18）——**donkey facade 必须做 provider_id 转发**。
-6. §4.3.1 exit code 映射——实测 ``401`` → exit 90（``ModelAuthenticationError``）、
+7. §4.3.1 exit code 映射——实测 ``401`` → exit 90（``ModelAuthenticationError``）、
    ``529`` → exit 83（``ModelAPIError``），与文档表格一致（案例 B07 / B08）。
 
-【设计缺口 —— 建议 v2.6 修订】
+【已落地的修订 —— 本 demo 实测的证据链（D1~D7 全部已合入《设计》v2.5+，此处保留发现过程作为依据）】
 
-D1. **§9.2「api_key 空 → warning + exit 0」这条链路走不通**（案例 A20）。
+D1. **空 ``api_key`` 走「warning + exit 0」链路走不通**（案例 A20）——**已落地**。
    loader 把缺失的 ``api_key`` 归一化为 ``""`` 之后，**构造** ChatModel 时底层
    ``openai`` SDK 直接抛 ``OpenAIError: Missing credentials ... or set the
    OPENAI_API_KEY ... environment variable``——失败发生在**构造期**而非运行期，
    且报错信息恰恰指向项目明令禁止的 env var 路径。
    ``ChatDeepSeek`` 同理（构造期 ``ValueError: If using default api base,
    DEEPSEEK_API_KEY must be set.``）。
-   → 建议：空 ``api_key`` 在 F002 load 阶段直接升级为**硬错**（exit 11 /
-   ``ProviderTomlFieldError``），而不是 warning。
+   → **已落地**：§9.2 改为 A/B/C 三档——C 档云端（21 家）空 key = **硬错 exit 11**
+        （``ProviderTomlFieldError``）；B 档填占位符 ``"not-needed"``；A 档合法无 warning。
 
 D2. **§4.3.1 对 ``ModelInvalidRequestError``(400) 的 exit code 自相矛盾**：
    §4.3.1 表格写 **83**，同节代码片段把它放进 ``NON_RETRYABLE_AUTH_ERRORS``（→ **90**），
    §17 一句话总结又写「400/ContextOverflowError → **85**」。同一异常三处三个值。
-   → 建议：统一为一个值（本 demo 按表格口径取 83），并删掉另两处表述。
+   → **已落地**：统一为 **83**——§4.3.1 表格 / 代码片段 / §16 Q-9.1 / §17 一句话总结 4 处已对齐。
 
-D3. **§8.3 模板里的 ``[MiniMax.models.MiniMax-M2.7]`` 会静默损坏模型表**
-   （案例 A11）。TOML 的裸 key 不允许含 ``.``，该行会被解析成嵌套表
+D3. **模型 id 含 ``.`` 时裸 key 会静默损坏模型表**（案例 A11）。TOML 的裸 key
+   不允许含 ``.``，``[models.MiniMax-M2.7]`` 会被解析成嵌套表
    ``MiniMax-M2 → 7``，``models["MiniMax-M2.7"]`` 永远查不到。
-   → 建议：模型 id 含 ``.`` 时必须写成 ``[MiniMax.models."MiniMax-M2.7"]``，
-   文档模板应加引号；bedrock 的 ``us.anthropic.claude-sonnet-4-6`` 同理。
+   → **v1 目录化改造后已在 §8.3 模板中修复**：模型 id 含 ``.`` 必须写成
+   ``[models."MiniMax-M2.7"]``（模板里已带注释说明）；bedrock 的
+   ``us.anthropic.claude-sonnet-4-6`` 同理。
 
 D4. **§10.1 的 deepseek ``api_host`` 描述与实现不符**：文档写
    ``https://api.deepseek.com``（"ChatDeepSeek 固定，不可改"），实测
    ``ChatDeepSeek`` 的 ``DEFAULT_API_BASE = "https://api.deepseek.com/v1"``
    （带 ``/v1``）且 ``api_base`` **可以覆盖**（别名 ``base_url``）。
-   → 建议：默认值改成 ``https://api.deepseek.com/v1``，删掉"不可改"。
+   → **已落地**：§8.3 ``providers/deepseek.toml`` 已改为 ``https://api.deepseek.com/v1``
+        （实测 ``DEFAULT_API_BASE``，带 ``/v1``）且注明 ``api_base`` 可覆盖。
 
 D5. **§5.1 「仅 o-series 用 ``max_completion_tokens``」与实现不符**（案例 B10）。
    langchain-openai 1.7.2 的 ``ChatOpenAI`` 对**所有**模型都把 ``max_tokens``
    重命名为 ``max_completion_tokens``（源码 ``base.py:3830`` / ``:3845``）；
    MiniMax OpenAI 兼容端点实测接受该字段名（返回 200）。
-   → 建议：§5.2「max_tokens 命名」一行改为「ChatOpenAI 一律下发
-   ``max_completion_tokens``；``ChatDeepSeek`` 等基于 ``BaseChatOpenAI`` 的类
-   仍下发 ``max_tokens``」。
+   → **已落地**：§5.2「max_tokens 命名」已按此改写。
 
 D6. **§7.3 的 temperature 软/硬越界示例自相矛盾**：硬越界示例是
    ``temperature = 3.0``，软越界示例是「``temperature > 2.0``」——3.0 > 2.0。
-   → 建议：明确硬边界 ``[0.0, 2.0]``（越界 = error），软边界另定（如 > 1.5 = warning）。
+   → **已落地**：§7.3 / §11.1 已明确硬边界 ``[0.0, 2.0]``（越界 = error / exit 11）、
+        软边界 ``> 1.5``（warning / exit 0）。
 
 D7. **§7.1 / §7.2 的「19 个 provider 节」与 §3.1 的 26 家白名单对不上**
    （§7.1 "典型 workspace 30–80 行（19 个 provider 节）"、§7.2 注释
    "顶层：全局默认 + 19 个 provider 独立节" / "... 19 个 provider 节（v1 白名单）"）。
-   → 建议：统一成 26（§3.1 表格实测 26 行，``_BUILTIN_PROVIDERS`` 实测 30 个）。
+   → **已落地**：v1 目录化改造后 = ``providers/`` 目录 + 一 provider 一文件，
+        26 家白名单与 ``providers/README.md`` 目录快照一致。
 
 【补充发现】
 
@@ -140,6 +161,17 @@ S2. MiniMax Coding Plan 集群会随机返回 ``529 overloaded``（本轮 12 次
 S3. MiniMax OpenAI 兼容端点**接受** ``reasoning_split`` 字段（实测请求体带
    ``"reasoning_split": false`` 返回 200），§3.6.4 的 ``extra_body`` 透传方案可行。
 
+S5. **流式响应下 ``usage`` 的端点行为不一致**（案例 B01 + B04，2026-10-21 实测）。
+   ``stream = true`` 时，MiniMax 的 OpenAI 兼容端点在最后一个 chunk 返回
+   ``"usage": null``（除非显式传 ``stream_options.include_usage=true``），
+   → LangChain 侧 ``usage_metadata = None``，应用层拿不到 token 统计；
+   而 DeepSeek 端点默认就带 usage。**非流式**调用两者都正常。
+   → **已落地**：解析层在流式下统一传 LangChain 官方参数 ``stream_usage=True``
+        （``langchain-openai`` / ``langchain-deepseek`` / ``langchain_qwq`` 均支持，
+        会自动补 ``stream_options={"include_usage": true}``），使跨 provider 的
+        ``usage_metadata`` 行为一致——**不是** ``[provider.extra]`` 自由透传口。
+        文档已同步：设计 §3.6.4（端点特性）+ §5.2 usage 行 + §15.2 provider 示例。
+
 S4. **HTTP 代理是网络层对 env var 的唯一依赖，§9.1「不读 env var」没有覆盖它**。
    §9.1 的"不读环境变量"只约束了 **api_key**；但 httpx / openai SDK 在构造
    client 时**默认读取** ``ALL_PROXY`` / ``HTTPS_PROXY`` / ``HTTP_PROXY``，
@@ -148,9 +180,10 @@ S4. **HTTP 代理是网络层对 env var 的唯一依赖，§9.1「不读 env va
    ``ValueError: Unknown scheme for proxy URL``，一条请求都发不出去。
    本 demo 因此在启动时统一治理代理（``sanitize_proxy_env()``）：
    装了 ``socksio`` 就照常用 socks 代理，没装就摘掉变量退回直连。
-   → 建议：设计文档 §9 增加一条「api_key 不读 env var，但**网络出口**仍受
-   ``HTTP_PROXY`` 等 env var 影响，跨 OS / 跨机器行为可能不一致」，
-   并在 §13（安全性）里说明代理 env var 的边界。
+   → **已落地**：设计文档已新增 **§9.4「网络出口的 env var 依赖（§9.1 立场的边界）」**
+        ——明确「api_key 不读 env var，但网络出口仍受 ``HTTP_PROXY`` 等 env var 影响」，
+        并给出 ``sanitize_proxy_env()`` 防御性清洗实现要点（§9.4 末）；§13.3 亦已补充
+        该风险声明。
 
 【demo 自身的边界】
 
@@ -192,11 +225,14 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_TOML = HERE / "provider.toml"
+# v1 布局：providers/ 目录 + 一 provider 一文件（设计文档 §7.1 / P-6）
+DEFAULT_PROVIDERS_DIR = HERE / "providers"
+# 保留名：providers/default.toml —— 存全局 default_provider / default_model
+GLOBAL_FILE = "default.toml"
 
-# 实际使用的配置文件（默认 = 脱敏版 provider.toml；--config 可指向 provider.local.toml）
+# 实际使用的配置目录（默认 = 脱敏版 providers/；--config 可指向 providers.local/）
 # —— demo **不读任何环境变量**取 key（设计文档 §9.2 V2-P2 立场）。
-CONFIG_PATH: Path = DEFAULT_TOML
+CONFIG_DIR: Path = DEFAULT_PROVIDERS_DIR
 
 # 网络出口模式："env" = 跟随 env 里的代理设置（默认）；"direct" = 强制直连。
 # 由命令行 --proxy 设置（见 main()）。
@@ -281,7 +317,7 @@ def sanitize_proxy_env(mode: str = "env") -> None:
 # §7.3 / §11.1 —— 错误体系（exit 11 伞形 Error class）
 # =============================================================================
 class ProviderTomlLoadError(Exception):
-    """exit 11（伞形）—— provider.toml 加载阶段任何失败。"""
+    """exit 11（伞形）—— providers/ 目录加载阶段任何失败。"""
 
 
 class ProviderTomlSyntaxError(ProviderTomlLoadError):
@@ -319,13 +355,14 @@ class ProviderTomlHostNotAllowedError(ProviderTomlLoadError):
 # =============================================================================
 # §3.0 / §3.1 / §3.5 —— v1 范围守卫
 # =============================================================================
-# 设计文档 §3.1 的 v1 白名单（26 家）。注意 provider_id 大小写敏感。
+# 设计文档 §3.1 的 v1 白名单（26 家）。provider_id **规范化为小写 kebab-case**（§7.1 命名规则
+# #2）——provider_id 会进入**文件名**，必须消除大小写不敏感文件系统的歧义。
 PROVIDER_WHITELIST_V1: frozenset[str] = frozenset(
     {
         # 原生闭源大厂
         "openai", "anthropic", "google", "meta", "xai", "mistral",
         # OpenAI 兼容（中文）
-        "qwen", "deepseek", "doubao", "kimi", "zhipu", "MiniMax",
+        "qwen", "deepseek", "doubao", "kimi", "zhipu", "minimax",
         "tencent", "xiaomi", "stepfun",
         # 国际云推理 / 平台
         "bedrock", "groq", "fireworks", "together", "cohere",
@@ -408,6 +445,9 @@ class ProviderSection(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
+    # §7.3 / P-7 —— per-provider 开关。缺省 true（文件存在 = 用户要配置它）；
+    # false = **完全惰性**（loader 在 schema 校验之前就跳过该文件）。
+    enabled: bool = True
     api_key: str = ""
     api_host: str = ""
     timeout: float = 60.0
@@ -461,7 +501,7 @@ class ProviderSection(BaseModel):
 
 
 class MiniMaxSection(ProviderSection):
-    """``[MiniMax]`` —— OpenAI 兼容 + Coding Plan ``sk-cp-`` 密钥（§3.6）。"""
+    """``providers/minimax.toml`` —— OpenAI 兼容 + Coding Plan ``sk-cp-`` 密钥（§3.6）。"""
 
     # §3.6.4：reasoning_split 是**显式声明的 schema 字段**（不是 [provider.extra]
     # 自由透传口），解析层负责翻译成 ChatOpenAI 的 extra_body。
@@ -519,22 +559,27 @@ _TYPE_ERROR_KINDS = {
 }
 
 
-def _pydantic_error_to_donkey(err: dict[str, Any]) -> ProviderTomlLoadError:
-    """把 Pydantic ValidationError 映射到设计文档的 7 类子错误。"""
+def _pydantic_error_to_donkey(err: dict[str, Any], filename: str = "") -> ProviderTomlLoadError:
+    """把 Pydantic ValidationError 映射到设计文档的 7 类子错误。
+
+    多文件布局下**错误消息必须携带文件路径**（§7.3）——"是哪个文件错了"
+    是用户修复的第一步。
+    """
     kind = err.get("type", "")
     loc = ".".join(str(x) for x in err.get("loc", ())) or "<root>"
     msg = err.get("msg", "")
+    prefix = f"{filename}: " if filename else ""
     if kind == "extra_forbidden":
         return ProviderTomlFieldError(
-            f"字段 {loc} 未在 schema 中声明（拼写错误？）：{msg}（§7.3 / V2-P5）"
+            f"{prefix}字段 {loc} 未在 schema 中声明（拼写错误？）：{msg}（§7.3 / V2-P5）"
         )
     if kind in _TYPE_ERROR_KINDS:
-        return ProviderTomlFieldTypeError(f"字段 {loc} 类型错误：{msg}（§11.1 #10）")
+        return ProviderTomlFieldTypeError(f"{prefix}字段 {loc} 类型错误：{msg}（§11.1 #16）")
     if kind == "missing":
-        return ProviderTomlFieldError(f"字段 {loc} 缺失：{msg}（§11.1）")
+        return ProviderTomlFieldError(f"{prefix}字段 {loc} 缺失：{msg}（§11.1）")
     if kind == "value_error":
-        return ProviderTomlFieldValueError(f"字段 {loc} 取值非法：{msg}（§11.1 #11）")
-    return ProviderTomlFieldError(f"字段 {loc} 校验失败：{msg}")
+        return ProviderTomlFieldValueError(f"{prefix}字段 {loc} 取值非法：{msg}（§11.1 #17）")
+    return ProviderTomlFieldError(f"{prefix}字段 {loc} 校验失败：{msg}")
 
 
 @dataclass(frozen=True)
@@ -546,6 +591,9 @@ class ProviderConfig:
     section: ProviderSection
     model_entry: ModelEntry
     warnings: list[str] = field(default_factory=list)
+    # §7.2 —— 目录扫描结果（哪些 provider 已启用 / 哪些被开关关掉）
+    enabled_providers: tuple[str, ...] = ()
+    disabled_providers: tuple[str, ...] = ()
 
     def merged_params(self) -> dict[str, Any]:
         """provider 级默认值 + model 级覆盖（§8.1「用户可按 model 覆盖」）。
@@ -562,7 +610,7 @@ class ProviderConfig:
 
 # provider_id → schema class（per-provider 独立 schema 的注册表）
 PROVIDER_SCHEMAS: dict[str, type[ProviderSection]] = {
-    "MiniMax": MiniMaxSection,
+    "minimax": MiniMaxSection,
     "deepseek": DeepSeekSection,
     "bedrock": BedrockSection,
     "ollama": ProviderSection,           # A 档：本地无鉴权
@@ -570,108 +618,142 @@ PROVIDER_SCHEMAS: dict[str, type[ProviderSection]] = {
 }
 
 
-def load_provider_toml(path: str | Path | None = None) -> ProviderConfig:
-    """F002 load：TOML → ProviderConfig（严格解析，错误全部归 exit 11 伞形）。"""
-    path = Path(path) if path is not None else CONFIG_PATH
+def _read_toml(path: Path) -> dict[str, Any]:
+    """读一个 TOML 文件（语法错 / 读不到 → exit 11 伞形）。"""
     try:
-        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        return tomllib.loads(path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as e:
-        raise ProviderTomlSyntaxError(f"{path}: TOML 语法错误：{e}") from e
+        raise ProviderTomlSyntaxError(f"{path.name}: TOML 语法错误：{e}") from e
     except OSError as e:
-        raise ProviderTomlSyntaxError(f"{path}: 无法读取：{e}") from e
+        raise ProviderTomlSyntaxError(f"{path.name}: 无法读取：{e}") from e
 
-    # --- 顶层字段 ---------------------------------------------------------
-    if "default_provider" not in raw:
-        raise ProviderTomlFieldError("顶层 default_provider 缺失（§7.3）")
-    if "default_model" not in raw:
-        raise ProviderTomlFieldError("顶层 default_model 缺失（§7.3）")
-    provider_id = raw["default_provider"]
-    model_id = raw["default_model"]
+
+def load_providers_dir(providers_dir: str | Path | None = None) -> ProviderConfig:
+    """F002 load：扫 ``providers/`` 目录 → ProviderConfig（严格解析，错误全部归 exit 11 伞形）。
+
+    加载顺序（设计文档 §7.2）：
+      1. 解析 ``providers/default.toml``（全局 default_provider / default_model）；
+      2. 逐个解析 provider 文件 → **文件名 stem 必须命中白名单**（否则 scope error）；
+      3. ``enabled = false`` 的文件 → **整份惰性**（不校验字段 / 不要求 api_key）；
+      4. ``enabled = true``（或缺省）的文件 → per-provider 严格 schema 校验；
+      5. 校验 default_provider / default_model 的**跨文件**一致性。
+    """
+    directory = Path(providers_dir) if providers_dir is not None else CONFIG_DIR
+    if not directory.is_dir():
+        raise ProviderTomlFieldError(f"providers 目录不存在：{directory}")
+
+    # --- 1. 全局默认（providers/default.toml）-----------------------------
+    global_path = directory / GLOBAL_FILE
+    if not global_path.is_file():
+        raise ProviderTomlFieldError(f"缺少 {GLOBAL_FILE}（providers/{GLOBAL_FILE}）")
+    g = _read_toml(global_path)
+    provider_id = g.get("default_provider", "")
+    model_id = g.get("default_model", "")
     if not isinstance(provider_id, str) or not provider_id:
-        raise ProviderTomlFieldTypeError("default_provider 必须是非空字符串（§11.1 #10）")
+        raise ProviderTomlFieldError(
+            f"{GLOBAL_FILE}: default_provider 缺失或为空（§7.3）"
+        )
     if not isinstance(model_id, str) or not model_id:
-        raise ProviderTomlFieldTypeError("default_model 必须是非空字符串（§11.1 #10）")
+        raise ProviderTomlFieldError(
+            f"{GLOBAL_FILE}: default_model 缺失或为空（§7.3）"
+        )
 
     # --- scope 校验（§3.3）-----------------------------------------------
     check_v1_scope(provider_id)
 
-    # --- provider 节存在性 -------------------------------------------------
-    raw_section = raw.get(provider_id)
-    if raw_section is None:
-        raise ProviderTomlFieldError(
-            f"provider '{provider_id}' 被 default_provider 引用，但 TOML 中没有 [{provider_id}] 节"
-        )
-    if not isinstance(raw_section, dict):
-        raise ProviderTomlFieldTypeError(f"[{provider_id}] 必须是 table（§11.1 #10）")
-
-    # --- §7.3：白名单外的 provider 节一律报错 -----------------------------
-    for key in raw:
-        if key in ("default_provider", "default_model"):
+    # --- 2~4. 扫描 provider 文件 -------------------------------------------
+    sections: dict[str, ProviderSection] = {}
+    disabled: list[str] = []
+    for path in sorted(directory.glob("*.toml")):
+        if path.name == GLOBAL_FILE:
             continue
-        if isinstance(raw[key], dict) and key not in PROVIDER_WHITELIST_V1:
-            check_v1_scope(key)  # 抛 ProviderTomlScopeError / ProviderNotInV1ScopeError
+        pid = path.stem  # 文件名 stem == provider_id（§7.1 命名规则）
+        # 未知 stem → scope error（**即使该文件 enabled = false** —— 防拼错文件名）
+        check_v1_scope(pid)
+        raw = _read_toml(path)
 
-    # --- per-provider 严格 schema 校验 ------------------------------------
-    schema_cls = PROVIDER_SCHEMAS.get(provider_id)
-    if schema_cls is None:
-        # §8 V2-P1：每个 provider 一套独立 schema —— 不允许用"通用 schema"兜底，
-        # 否则该 provider 的专属字段会被误判为"拼写错误"。
+        enabled = raw.get("enabled", True)  # 缺省 true（§7.3）
+        if not isinstance(enabled, bool):
+            raise ProviderTomlFieldTypeError(f"{path.name}: enabled 必须是 bool")
+        if not enabled:
+            disabled.append(pid)
+            continue  # **完全惰性**：不校验字段 / 不要求 api_key / 不参与连通性检查
+
+        schema_cls = PROVIDER_SCHEMAS.get(pid)
+        if schema_cls is None:
+            # §8 V2-P1：每个 provider 一套独立 schema —— 不允许用"通用 schema"兜底，
+            # 否则该 provider 的专属字段会被误判为"拼写错误"。
+            raise ProviderTomlFieldError(
+                f"{path.name}: provider '{pid}' 的 per-provider schema 尚未实现"
+                f"（§8 V2-P1 要求每个 provider 一套独立 schema；"
+                f"本 demo 只实现了 {sorted(PROVIDER_SCHEMAS)}）"
+            )
+        try:
+            section = schema_cls.model_validate(raw)
+        except ValidationError as e:
+            raise _pydantic_error_to_donkey(e.errors()[0], path.name) from e
+
+        # --- api_key 归一化（§9.1.1 强约束）------------------------------
+        section.api_key = load_api_key(raw)
+
+        # --- api_host 不允许覆盖的 provider（§11.1 #19）--------------------
+        if pid in API_HOST_NOT_ALLOWED and section.api_host not in ("", "default"):
+            raise ProviderTomlHostNotAllowedError(
+                f"{path.name}: 该 LangChain 类不允许 api_host 覆盖（填了 {section.api_host!r}）"
+            )
+
+        # --- 空 api_key：按 provider 分三档（§9.2 联网调研结论）------------
+        #   A 档本地（ollama / meta）      → 合法，无 warning
+        #   B 档 openai-compatible          → 合法 + warning（端点是否校验鉴权未知）
+        #   C 档云端 provider（其余 21 个） → 硬错 exit 11
+        tier = API_KEY_OPTIONAL_PROVIDERS.get(pid, "C")
+        if not section.api_key and tier == "C":
+            raise ProviderTomlFieldError(
+                f"{path.name}: api_key 为空 —— 云端 provider 必须配置真实 key"
+                f"（§9.2 C 档：空 key 100% 在构造 ChatModel 阶段失败，报错文案还会指向"
+                f"env var，与 V2-P2「绝不读 env var」立场冲突 → 早失败）"
+            )
+        sections[pid] = section
+
+    # --- 5. 跨文件校验（全局默认 ↔ provider 文件）--------------------------
+    if not sections:
         raise ProviderTomlFieldError(
-            f"provider '{provider_id}' 的 per-provider schema 尚未实现"
-            f"（§8 V2-P1 要求每个 provider 一套独立 schema；"
-            f"本 demo 只实现了 {sorted(PROVIDER_SCHEMAS)}）"
+            "providers/ 下没有任何启用的 provider —— 请把某个 providers/<id>.toml 的 "
+            "enabled 改成 true，并在 providers/default.toml 填 default_provider / default_model"
         )
-    try:
-        section = schema_cls.model_validate(raw_section)
-    except ValidationError as e:
-        raise _pydantic_error_to_donkey(e.errors()[0]) from e
-
-    # --- api_key 归一化（§9.1.1 强约束）----------------------------------
-    section.api_key = load_api_key(raw_section)
-
-    # --- api_host 不允许覆盖的 provider（§11.1 #13）------------------------
-    if provider_id in API_HOST_NOT_ALLOWED and section.api_host not in ("", "default"):
-        raise ProviderTomlHostNotAllowedError(
-            f"[{provider_id}] 的 LangChain 类不允许 api_host 覆盖（填了 {section.api_host!r}）"
+    if provider_id not in sections:
+        raise ProviderTomlFieldError(
+            f"default_provider='{provider_id}' 对应的 providers/{provider_id}.toml "
+            f"不存在或未启用（已启用：{sorted(sections) or '（无）'}）"
         )
-
-    # --- default_model 必须在 models 表中（§11.1 #12）----------------------
+    section = sections[provider_id]
     if model_id not in section.models:
         raise ProviderTomlMissingModelError(
-            f"default_model '{model_id}' 不在 [{provider_id}.models] 表中；"
+            f"default_model '{model_id}' 不在 providers/{provider_id}.toml 的 [models] 表中；"
             f"已注册：{sorted(section.models) or '（空）'}"
-        )
-
-    # --- 空 api_key：按 provider 分三档（§9.2 联网调研结论）----------------
-    #   A 档本地（ollama / meta）      → 合法，无 warning
-    #   B 档 openai-compatible          → 合法 + warning（端点是否校验鉴权未知）
-    #   C 档云端 provider（其余 21 个） → 硬错 exit 11
-    tier = API_KEY_OPTIONAL_PROVIDERS.get(provider_id, "C")
-    if not section.api_key and tier == "C":
-        raise ProviderTomlFieldError(
-            f"[{provider_id}] api_key 为空 —— 云端 provider 必须配置真实 key"
-            f"（§9.2 C 档：空 key 100% 在构造 ChatModel 阶段失败，报错文案还会指向"
-            f"env var，与 V2-P2「绝不读 env var」立场冲突 → 早失败）"
         )
 
     # --- warnings（不阻塞 load，exit 0）------------------------------------
     warnings: list[str] = []
+    tier = API_KEY_OPTIONAL_PROVIDERS.get(provider_id, "C")
     if not section.api_key and tier == "B":
         warnings.append(
-            f"[{provider_id}] api_key 为空 —— 该端点是否校验鉴权未知（§9.2 B 档）；"
+            f"providers/{provider_id}.toml: api_key 为空 —— 该端点是否校验鉴权未知（§9.2 B 档）；"
             f"解析层将填占位符 \"not-needed\"（openai SDK 拒绝空串）"
         )
     if section.api_host == "default" and provider_id != "ollama":
         warnings.append(
-            f"[{provider_id}] api_host = \"default\" 仅 ollama 支持，将回退到 provider 默认端点（§11.1 #18）"
+            f"providers/{provider_id}.toml: api_host = \"default\" 仅 ollama 支持，"
+            f"将回退到 provider 默认端点（§11.1 #24）"
         )
     if section.temperature > 1.5:
         warnings.append(
-            f"[{provider_id}] temperature = {section.temperature} 偏高（软越界，仅 warning，§11.1 #14）"
+            f"providers/{provider_id}.toml: temperature = {section.temperature} 偏高"
+            f"（软越界，仅 warning，§11.1 #20）"
         )
     if section.api_host == "" and provider_id not in ("ollama", "openai-compatible", "meta", "databricks"):
         warnings.append(
-            f"[{provider_id}] api_host 为空 —— 解析层将使用 provider 默认端点（§10.1）"
+            f"providers/{provider_id}.toml: api_host 为空 —— 解析层将使用 provider 默认端点（§10.1）"
         )
 
     return ProviderConfig(
@@ -680,6 +762,8 @@ def load_provider_toml(path: str | Path | None = None) -> ProviderConfig:
         section=section,
         model_entry=section.models[model_id],
         warnings=warnings,
+        enabled_providers=tuple(sorted(sections)),
+        disabled_providers=tuple(sorted(disabled)),
     )
 
 
@@ -701,7 +785,7 @@ class ReusableProvider(ABC):
 class MiniMaxProvider(ReusableProvider):
     """MiniMax 走 ``ChatOpenAI + base_url``（OpenAI 兼容协议，§3.6 / §15.2）。"""
 
-    provider_id = "MiniMax"
+    provider_id = "minimax"
     default_api_host = "https://api.minimaxi.com/v1"
     section_cls = MiniMaxSection
 
@@ -725,6 +809,15 @@ class MiniMaxProvider(ReusableProvider):
             "max_retries": params.get("max_retries", 6),
             "streaming": bool(params.get("stream", True)),
         }
+        # ⚠️ 实测发现（S5）：**流式**响应下 provider 端点的 usage 行为不一致——
+        #    MiniMax 的 OpenAI 兼容端点返回 "usage": null（除非显式传
+        #    stream_options.include_usage=true）→ LangChain 侧 usage_metadata = None；
+        #    DeepSeek 端点则默认带 usage。
+        #    统一开 `stream_usage=True`（langchain-openai / langchain-deepseek 的
+        #    **官方参数**，会自动补 stream_options={"include_usage": true}），
+        #    让跨 provider 的 usage_metadata 行为一致——**不是**自由透传口。
+        if kwargs["streaming"]:
+            kwargs["stream_usage"] = True
         if params.get("top_p") is not None:
             kwargs["top_p"] = params["top_p"]
         if params.get("stop") is not None:
@@ -757,6 +850,15 @@ class DeepSeekProvider(ReusableProvider):
             "max_retries": params.get("max_retries", 6),
             "streaming": bool(params.get("stream", True)),
         }
+        # ⚠️ 实测发现（S5）：**流式**响应下 provider 端点的 usage 行为不一致——
+        #    MiniMax 的 OpenAI 兼容端点返回 "usage": null（除非显式传
+        #    stream_options.include_usage=true）→ LangChain 侧 usage_metadata = None；
+        #    DeepSeek 端点则默认带 usage。
+        #    统一开 `stream_usage=True`（langchain-openai / langchain-deepseek 的
+        #    **官方参数**，会自动补 stream_options={"include_usage": true}），
+        #    让跨 provider 的 usage_metadata 行为一致——**不是**自由透传口。
+        if kwargs["streaming"]:
+            kwargs["stream_usage"] = True
         if params.get("top_p") is not None:
             kwargs["top_p"] = params["top_p"]
         if params.get("stop") is not None:
@@ -770,7 +872,7 @@ class DeepSeekProvider(ReusableProvider):
 
 
 PROVIDER_REGISTRY: dict[str, ReusableProvider] = {
-    "MiniMax": MiniMaxProvider(),
+    "minimax": MiniMaxProvider(),
     "deepseek": DeepSeekProvider(),
 }
 
@@ -808,7 +910,7 @@ def build_chat_model(cfg: ProviderConfig, **overrides: Any):
 
 def get_default_chat_model(path: str | Path | None = None, **overrides: Any):
     """业务代码唯一入口：``model = get_default_chat_model()``（§2.4）。"""
-    cfg = load_provider_toml(path)
+    cfg = load_providers_dir(path)
     return build_chat_model(cfg, **overrides)
 
 
@@ -961,31 +1063,65 @@ def skip(label: str, reason: str) -> None:
 # =============================================================================
 # 案例组 A —— F002 load 阶段（离线，不发网络请求）
 # =============================================================================
-BASE_TOML = """\
-default_provider = "MiniMax"
+# ---------------------------------------------------------------------------
+# §7.1 —— 配置布局：providers/ 目录 + 一 provider 一文件
+#   default.toml  ← 保留名：全局 default_provider / default_model
+#   minimax.toml  ← 一个 provider 一个文件（含 enabled 开关）
+#   deepseek.toml
+# ---------------------------------------------------------------------------
+DEFAULT_TOML_TEXT = """\
+# providers/default.toml —— 全局默认（保留名）
+default_provider = "minimax"
 default_model = "MiniMax-M3"
+"""
 
-[MiniMax]
+MINIMAX_TOML_TEXT = """\
+# providers/minimax.toml —— MiniMax（OpenAI 兼容 + Coding Plan sk-cp- 密钥）
+enabled = true
 api_key = "sk-cp-demo"
 api_host = "https://api.minimaxi.com/v1"
 temperature = 0.7
 
-[MiniMax.models.MiniMax-M3]
+[models.MiniMax-M3]
 max_tokens = 8192
+"""
 
-[deepseek]
+DEEPSEEK_TOML_TEXT = """\
+# providers/deepseek.toml —— DeepSeek（专用 ChatDeepSeek）
+enabled = true
 api_key = "sk-demo"
 api_host = "https://api.deepseek.com/v1"
 
-[deepseek.models.deepseek-v4-flash]
+[models.deepseek-v4-flash]
 max_tokens = 4096
 """
 
+BASE_FILES: dict[str, str] = {
+    GLOBAL_FILE: DEFAULT_TOML_TEXT,
+    "minimax.toml": MINIMAX_TOML_TEXT,
+    "deepseek.toml": DEEPSEEK_TOML_TEXT,
+}
 
-def _write_temp_toml(text: str) -> Path:
-    fd, name = tempfile.mkstemp(suffix=".toml", prefix="donkey_demo_")
-    Path(name).write_text(text, encoding="utf-8")
-    return Path(name)
+
+def _files(**overrides: str) -> dict[str, str]:
+    """在 BASE_FILES 基础上覆盖 / 新增文件（返回新 dict，不改 BASE_FILES）。"""
+    files = dict(BASE_FILES)
+    files.update(overrides)
+    return files
+
+
+def _write_temp_providers(files: dict[str, str]) -> Path:
+    """把一组文件写进临时目录 → 返回目录路径（模拟一个 providers/ 目录）。"""
+    directory = Path(tempfile.mkdtemp(prefix="donkey_demo_providers_"))
+    for name, text in files.items():
+        (directory / name).write_text(text, encoding="utf-8")
+    return directory
+
+
+def _cleanup_temp_providers(directory: Path) -> None:
+    for child in directory.glob("*"):
+        child.unlink(missing_ok=True)
+    directory.rmdir()
 
 
 def run_load_cases() -> None:
@@ -993,8 +1129,8 @@ def run_load_cases() -> None:
     banner("A 组｜F002 load 阶段校验（离线，对应设计文档 §7.3 / §9 / §10 / §11.1）")
 
     # --- A01 正常加载 -----------------------------------------------------
-    step("A01  正常加载 provider.toml（happy path）")
-    cfg = load_provider_toml(CONFIG_PATH)
+    step("A01  正常加载 providers/ 目录（happy path）")
+    cfg = load_providers_dir(CONFIG_DIR)
     print(f"  provider_id       = {cfg.provider_id}")
     print(f"  model_id          = {cfg.model_id}")
     print(f"  api_key           = {mask(cfg.section.api_key)}")
@@ -1003,6 +1139,8 @@ def run_load_cases() -> None:
     print(f"  max_tokens        = {cfg.section.max_tokens} (provider 级) "
           f"→ {cfg.merged_params()['max_tokens']} (model 级覆盖后)")
     print(f"  models 表         = {sorted(cfg.section.models)}")
+    print(f"  已启用 provider   = {list(cfg.enabled_providers)}")
+    print(f"  已禁用 provider   = {list(cfg.disabled_providers)}")
     for w in cfg.warnings:
         print(f"  [warning] {w}")
     check("A01 正常加载成功且 model 级参数覆盖 provider 级", True,
@@ -1012,71 +1150,106 @@ def run_load_cases() -> None:
     negative_cases = [
         (
             "A02  字段拼写错误（temprature）→ ProviderTomlFieldError",
-            BASE_TOML.replace("temperature = 0.7", "temprature = 0.7"),
+            _files(**{"minimax.toml": MINIMAX_TOML_TEXT.replace(
+                "temperature = 0.7", "temprature = 0.7")}),
             ProviderTomlFieldError,
         ),
         (
             "A03  字段类型错误（timeout = \"60\"）→ ProviderTomlFieldTypeError",
-            BASE_TOML.replace('api_host = "https://api.minimaxi.com/v1"',
-                              'api_host = "https://api.minimaxi.com/v1"\ntimeout = "60"'),
+            _files(**{"minimax.toml": MINIMAX_TOML_TEXT.replace(
+                'api_host = "https://api.minimaxi.com/v1"',
+                'api_host = "https://api.minimaxi.com/v1"\ntimeout = "60"')}),
             ProviderTomlFieldTypeError,
         ),
         (
             "A04  字段值硬越界（temperature = 3.0）→ ProviderTomlFieldValueError",
-            BASE_TOML.replace("temperature = 0.7", "temperature = 3.0"),
+            _files(**{"minimax.toml": MINIMAX_TOML_TEXT.replace(
+                "temperature = 0.7", "temperature = 3.0")}),
             ProviderTomlFieldValueError,
         ),
         (
             "A05  api_host 非 URL → ProviderTomlFieldValueError",
-            BASE_TOML.replace('api_host = "https://api.minimaxi.com/v1"', 'api_host = "not a url"'),
+            _files(**{"minimax.toml": MINIMAX_TOML_TEXT.replace(
+                'api_host = "https://api.minimaxi.com/v1"', 'api_host = "not a url"')}),
             ProviderTomlFieldValueError,
         ),
         (
-            "A06  白名单外 provider（[foo_ai]）→ ProviderTomlScopeError",
-            BASE_TOML + '\n[foo_ai]\napi_key = "x"\n',
+            "A06  白名单外 provider（providers/foo_ai.toml）→ ProviderTomlScopeError",
+            _files(**{"foo_ai.toml": 'api_key = "x"\n'}),
             ProviderTomlScopeError,
         ),
         (
-            "A07  v2+ 候选 provider（[baidu]）→ ProviderNotInV1ScopeError",
-            BASE_TOML + '\n[baidu]\napi_key = "x"\n',
+            "A07  v2+ 候选 provider（providers/baidu.toml）→ ProviderNotInV1ScopeError",
+            _files(**{"baidu.toml": 'api_key = "x"\n'}),
             ProviderNotInV1ScopeError,
         ),
         (
-            "A08  default_model 不在 models 表 → ProviderTomlMissingModelError",
-            BASE_TOML.replace('default_model = "MiniMax-M3"', 'default_model = "MiniMax-M9"'),
+            "A08  default_model 不在 [models] 表 → ProviderTomlMissingModelError",
+            _files(**{GLOBAL_FILE: DEFAULT_TOML_TEXT.replace(
+                'default_model = "MiniMax-M3"', 'default_model = "MiniMax-M9"')}),
             ProviderTomlMissingModelError,
         ),
         (
             "A09  api_key 类型错误（api_key = 42）→ ProviderTomlFieldTypeError",
-            BASE_TOML.replace('api_key = "sk-cp-demo"', "api_key = 42"),
+            _files(**{"minimax.toml": MINIMAX_TOML_TEXT.replace(
+                'api_key = "sk-cp-demo"', "api_key = 42")}),
             ProviderTomlFieldTypeError,
         ),
         (
             "A10  TOML 语法错误 → ProviderTomlSyntaxError",
-            BASE_TOML + "\nthis is not valid toml =\n",
+            _files(**{"ollama.toml": "this is not valid toml =\n"}),
             ProviderTomlSyntaxError,
         ),
         (
             "A11  model_id 含 '.' 未加引号（MiniMax-M2.7）→ 静默嵌套 → ProviderTomlFieldError",
-            BASE_TOML.replace("[MiniMax.models.MiniMax-M3]", "[MiniMax.models.MiniMax-M2.7]"),
+            _files(**{"minimax.toml": MINIMAX_TOML_TEXT.replace(
+                "[models.MiniMax-M3]", "[models.MiniMax-M2.7]")}),
             ProviderTomlFieldError,
         ),
         (
-            "A12  顶层 default_provider 缺失 → ProviderTomlFieldError",
-            BASE_TOML.replace('default_provider = "MiniMax"\n', ""),
+            "A12  default_provider 缺失 → ProviderTomlFieldError",
+            _files(**{GLOBAL_FILE: DEFAULT_TOML_TEXT.replace(
+                'default_provider = "minimax"\n', "")}),
             ProviderTomlFieldError,
         ),
         (
-            "A13  顶层 default_model 缺失 → ProviderTomlFieldError",
-            BASE_TOML.replace('default_model = "MiniMax-M3"\n', ""),
+            "A13  default_model 缺失 → ProviderTomlFieldError",
+            _files(**{GLOBAL_FILE: DEFAULT_TOML_TEXT.replace(
+                'default_model = "MiniMax-M3"\n', "")}),
             ProviderTomlFieldError,
+        ),
+        # --- v1 新增：目录化 + enabled 开关的专属校验（§7.3）----------------
+        (
+            "A24  零 enabled provider（全部 enabled = false）→ ProviderTomlFieldError",
+            _files(**{
+                "minimax.toml": MINIMAX_TOML_TEXT.replace("enabled = true", "enabled = false"),
+                "deepseek.toml": DEEPSEEK_TOML_TEXT.replace("enabled = true", "enabled = false"),
+            }),
+            ProviderTomlFieldError,
+        ),
+        (
+            "A25  default_provider 指向已禁用的 provider → ProviderTomlFieldError",
+            _files(**{"minimax.toml": MINIMAX_TOML_TEXT.replace(
+                "enabled = true", "enabled = false")}),
+            ProviderTomlFieldError,
+        ),
+        (
+            "A26  default_provider 指向不存在的文件 → ProviderTomlFieldError",
+            _files(**{GLOBAL_FILE: DEFAULT_TOML_TEXT.replace(
+                'default_provider = "minimax"', 'default_provider = "openai"')}),
+            ProviderTomlFieldError,
+        ),
+        (
+            "A27  文件名大小写不一致（providers/MiniMax.toml）→ ProviderTomlScopeError",
+            _files(**{"MiniMax.toml": MINIMAX_TOML_TEXT}),
+            ProviderTomlScopeError,
         ),
     ]
 
-    for label, text, expected in negative_cases:
-        path = _write_temp_toml(text)
+    for label, files, expected in negative_cases:
+        directory = _write_temp_providers(files)
         try:
-            load_provider_toml(path)
+            load_providers_dir(directory)
             check(label, False, "没有抛异常 —— schema 校验失效！")
         except ProviderTomlLoadError as e:
             actual = type(e)
@@ -1088,7 +1261,7 @@ def run_load_cases() -> None:
         except Exception as e:  # noqa: BLE001
             check(label, False, f"抛了非预期异常 {type(e).__name__}: {e}")
         finally:
-            path.unlink(missing_ok=True)
+            _cleanup_temp_providers(directory)
 
     # --- A14 api_key 缺失 → 归一化为 ""（§9.1.1），且不触发 env var 回退 ----
     step("A14  api_key 字段缺失 → 归一化为 \"\"，绝不回退 env var（§9.1.1）")
@@ -1097,20 +1270,20 @@ def run_load_cases() -> None:
     os.environ["OPENAI_API_KEY"] = "sk-env-should-never-be-used"
     os.environ["DEEPSEEK_API_KEY"] = "sk-env-should-never-be-used"
     # 用 A 档（ollama，本地无鉴权）验证"归一化为 ''"这一步本身不报错
-    a_toml = (
-        'default_provider = "ollama"\n'
-        'default_model = "llama3.1"\n'
-        "\n"
-        "[ollama]\n"
-        'api_host = "default"\n'
-        "\n"
-        # ⚠️ model_id 含 "." 必须加引号（否则 TOML 解析成嵌套表 —— D3 的实测复现）
-        "[ollama.models.\"llama3.1\"]\n"
-        "max_tokens = 2048\n"
-    )
-    path = _write_temp_toml(a_toml)
+    a_files = {
+        GLOBAL_FILE: 'default_provider = "ollama"\ndefault_model = "llama3.1"\n',
+        "ollama.toml": (
+            'enabled = true\n'
+            'api_host = "default"\n'
+            "\n"
+            # ⚠️ model_id 含 "." 必须加引号（否则 TOML 解析成嵌套表 —— D3 的实测复现）
+            '[models."llama3.1"]\n'
+            "max_tokens = 2048\n"
+        ),
+    }
+    directory = _write_temp_providers(a_files)
     try:
-        cfg = load_provider_toml(path)
+        cfg = load_providers_dir(directory)
         check("A14 api_key 缺失 → 归一化为 \"\"（不是 None）", cfg.section.api_key == "",
               f"api_key = {mask(cfg.section.api_key)}")
         check("A14 A 档（ollama）空 api_key 合法且无 warning（§9.2 A 档）",
@@ -1119,38 +1292,42 @@ def run_load_cases() -> None:
         check("A14 进程内 env var 存在但未被读取（V2-P2 立场）",
               os.environ["OPENAI_API_KEY"] == "sk-env-should-never-be-used")
     finally:
-        path.unlink(missing_ok=True)
+        _cleanup_temp_providers(directory)
         os.environ.pop("OPENAI_API_KEY", None)
         os.environ.pop("DEEPSEEK_API_KEY", None)
 
     # --- A21~A23 空 api_key 三档（§9.2 联网调研结论）----------------------
     step("A21~A23  空 api_key 按 provider 分三档（§9.2）")
     # C 档：云端 provider → 硬错 exit 11
-    text = BASE_TOML.replace('api_key = "sk-cp-demo"\n', "")
-    path = _write_temp_toml(text)
+    files = _files(**{"minimax.toml": MINIMAX_TOML_TEXT.replace(
+        'api_key = "sk-cp-demo"\n', "")})
+    directory = _write_temp_providers(files)
     try:
-        load_provider_toml(path)
-        check("A21 C 档（MiniMax，云端）空 api_key → 硬错 exit 11", False, "没有抛异常")
+        load_providers_dir(directory)
+        check("A21 C 档（minimax，云端）空 api_key → 硬错 exit 11", False, "没有抛异常")
     except ProviderTomlFieldError as e:
-        check("A21 C 档（MiniMax，云端）空 api_key → 硬错 exit 11", True, str(e)[:90])
+        check("A21 C 档（minimax，云端）空 api_key → 硬错 exit 11", True, str(e)[:90])
         check("A21 exit code = 11", compute_exit_code(e) == 11)
     finally:
-        path.unlink(missing_ok=True)
+        _cleanup_temp_providers(directory)
 
     # B 档：openai-compatible → 合法 + warning
-    b_toml = (
-        'default_provider = "openai-compatible"\n'
-        'default_model = "my-local-model"\n'
-        "\n"
-        "[openai-compatible]\n"
-        'api_host = "http://localhost:8000/v1"\n'
-        "\n"
-        "[openai-compatible.models.my-local-model]\n"
-        "max_tokens = 4096\n"
-    )
-    path = _write_temp_toml(b_toml)
+    b_files = {
+        GLOBAL_FILE: (
+            'default_provider = "openai-compatible"\n'
+            'default_model = "my-local-model"\n'
+        ),
+        "openai-compatible.toml": (
+            "enabled = true\n"
+            'api_host = "http://localhost:8000/v1"\n'
+            "\n"
+            "[models.my-local-model]\n"
+            "max_tokens = 4096\n"
+        ),
+    }
+    directory = _write_temp_providers(b_files)
     try:
-        cfg = load_provider_toml(path)
+        cfg = load_providers_dir(directory)
         check("A22 B 档（openai-compatible）空 api_key → 合法 + warning（§9.2 B 档）",
               any("api_key" in w for w in cfg.warnings),
               "；".join(cfg.warnings) or "（无 warning）")
@@ -1164,56 +1341,61 @@ def run_load_cases() -> None:
     except Exception as e:  # noqa: BLE001
         check("A22 B 档 openai-compatible 空 api_key", False, f"{type(e).__name__}: {str(e)[:120]}")
     finally:
-        path.unlink(missing_ok=True)
+        _cleanup_temp_providers(directory)
 
     # --- A15 warning 路径：软越界 / api_host = "default" -------------------
     step("A15  warning 路径（软越界 / api_host=\"default\"）→ exit 0，不阻塞 load")
-    text = BASE_TOML.replace("temperature = 0.7", "temperature = 1.9")
-    path = _write_temp_toml(text)
+    files = _files(**{"minimax.toml": MINIMAX_TOML_TEXT.replace(
+        "temperature = 0.7", "temperature = 1.9")})
+    directory = _write_temp_providers(files)
     try:
-        cfg = load_provider_toml(path)
+        cfg = load_providers_dir(directory)
         check("A15 temperature=1.9 软越界 → 仅 warning", any("偏高" in w for w in cfg.warnings),
               "；".join(cfg.warnings))
     finally:
-        path.unlink(missing_ok=True)
+        _cleanup_temp_providers(directory)
 
     # --- A16 models 子表中的字段也必须严格 ---------------------------------
     step("A16  models 子表字段也受严格 schema 约束（extra=forbid 向下生效）")
-    text = BASE_TOML.replace("[MiniMax.models.MiniMax-M3]\nmax_tokens = 8192",
-                              "[MiniMax.models.MiniMax-M3]\nmax_token = 8192")
-    path = _write_temp_toml(text)
+    files = _files(**{"minimax.toml": MINIMAX_TOML_TEXT.replace(
+        "[models.MiniMax-M3]\nmax_tokens = 8192",
+        "[models.MiniMax-M3]\nmax_token = 8192")})
+    directory = _write_temp_providers(files)
     try:
-        load_provider_toml(path)
+        load_providers_dir(directory)
         check("A16 models 子表字段拼写错误被拦截", False, "没有抛异常")
     except ProviderTomlFieldError as e:
         check("A16 models 子表字段拼写错误被拦截", True, str(e)[:90])
     finally:
-        path.unlink(missing_ok=True)
+        _cleanup_temp_providers(directory)
 
     # --- A17 api_host 不允许覆盖（§11.1 #13）-------------------------------
     step("A17  provider 类不允许 api_host 覆盖 → ProviderTomlHostNotAllowedError")
-    text = (
-        'default_provider = "bedrock"\n'
-        'default_model = "us.anthropic.claude-sonnet-4-6"\n'
-        "\n"
-        "[bedrock]\n"
-        'aws_access_key_id = "AKIA..."\n'
-        'aws_secret_access_key = "secret"\n'
-        'aws_region = "us-east-1"\n'
-        'api_host = "https://my-proxy.example.com"\n'
-        "\n"
-        "[bedrock.models.\"us.anthropic.claude-sonnet-4-6\"]\n"
-        "max_tokens = 8192\n"
-    )
-    path = _write_temp_toml(text)
+    files = {
+        GLOBAL_FILE: (
+            'default_provider = "bedrock"\n'
+            'default_model = "us.anthropic.claude-sonnet-4-6"\n'
+        ),
+        "bedrock.toml": (
+            "enabled = true\n"
+            'aws_access_key_id = "AKIA..."\n'
+            'aws_secret_access_key = "secret"\n'
+            'aws_region = "us-east-1"\n'
+            'api_host = "https://my-proxy.example.com"\n'
+            "\n"
+            '[models."us.anthropic.claude-sonnet-4-6"]\n'
+            "max_tokens = 8192\n"
+        ),
+    }
+    directory = _write_temp_providers(files)
     try:
-        load_provider_toml(path)
+        load_providers_dir(directory)
         check("A17 api_host 不允许覆盖被拦截", False, "没有抛异常")
     except ProviderTomlHostNotAllowedError as e:
-        check("A17 api_host 不允许覆盖被拦截（§11.1 #13）", True, str(e)[:90])
+        check("A17 api_host 不允许覆盖被拦截（§11.1 #19）", True, str(e)[:90])
         check("A17 exit code = 11", compute_exit_code(e) == 11)
     finally:
-        path.unlink(missing_ok=True)
+        _cleanup_temp_providers(directory)
 
     # --- A18 白名单与 LangChain 官方 provider 列表交叉核对（§3.1）---------
     step("A18  白名单与 LangChain init_chat_model 官方 provider 列表交叉核对（§3.1）")
@@ -1245,7 +1427,7 @@ def run_load_cases() -> None:
     # --- A19 白名单 provider_id 与 LangChain 别名的交集说明 -----------------
     step("A19  白名单 provider_id ≠ LangChain 别名的情况（facade 必须翻译）")
     alias_map = {
-        "MiniMax": "openai",        # §3.6：MiniMax 走 ChatOpenAI + base_url
+        "minimax": "openai",        # §3.6：minimax 走 ChatOpenAI + base_url
         "openai-compatible": "openai",
         "xiaomi": "openrouter",
         "meta": "ollama",
@@ -1254,14 +1436,14 @@ def run_load_cases() -> None:
     for pid, lc in alias_map.items():
         print(f"  donkey provider_id={pid!r} → LangChain provider_id={lc!r}")
     check("A19 8 个 OpenAI 兼容 provider 复用 ChatOpenAI（§3.2 关键观察）",
-          alias_map["MiniMax"] == "openai" and alias_map["openai-compatible"] == "openai")
+          alias_map["minimax"] == "openai" and alias_map["openai-compatible"] == "openai")
     check("A19 2 个多平台路由 provider 需 facade 翻译（§3.2 关键观察）",
           alias_map["xiaomi"] == "openrouter" and alias_map["meta"] == "ollama")
 
     # --- A20 空 api_key 的真实后果（§9.1.1 / §9.2 的设计缺口）------------
     step("A20  ⚠️ 归一化后的 api_key=\"\" 在**模型构造期**的真实后果（设计缺口）")
     empty_cfg = ProviderConfig(
-        provider_id="MiniMax",
+        provider_id="minimax",
         model_id="MiniMax-M3",
         section=MiniMaxSection.model_validate({"api_key": "", "stream": False}),
         model_entry=ModelEntry(),
@@ -1283,9 +1465,9 @@ def run_load_cases() -> None:
         print("  → 结论：§9.1.1 的「api_key 缺失 → \"\"，不回退 env var」在 LangChain 层")
         print("    成立（确实不回退），但底层 openai SDK 见到空串直接拒绝构造 client，")
         print("    且报错信息恰恰指向 env var（项目明令禁止的路径）。")
-        print("    因此 §9.2「api_key 空 → warning + exit 0，运行时抛鉴权异常 → exit 90」")
-        print("    这条链路在实践中走不通：空 api_key 应在 F002 load 阶段升级为硬错")
-        print("    （exit 11 / ProviderTomlFieldError），或至少在构造 ChatModel 前拦截。")
+        print("    因此空 api_key 走「warning + exit 0，运行时抛鉴权异常 → exit 90」链路")
+        print("    在实践中走不通——**该发现已被采纳**：§9.2 改为 A/B/C 三档，C 档云端")
+        print("    （21 家）空 api_key = 硬错 exit 11（ProviderTomlFieldError）。")
     finally:
         os.environ.update(proxy_env)
 
@@ -1319,14 +1501,14 @@ def run_runtime_cases() -> None:
     banner("B 组｜运行时验证（联网，MiniMax-M3 + deepseek-v4-flash）")
 
     # --- 脱敏占位符检测：配置文件里还是占位符就别去联网了 ------------------
-    placeholders = _find_placeholder_keys(CONFIG_PATH)
+    placeholders = _find_placeholder_keys(CONFIG_DIR)
     if placeholders:
         print("  ⚠️ 当前配置里的 api_key 仍是占位符 —— 跳过联网用例：")
         for item in placeholders:
             print(f"       {item}")
-        print("     → 真实 key 请写进 provider.local.toml（已 gitignore），然后：")
+        print("     → 真实 key 请写进 providers.local/（已 gitignore），然后：")
         print(f"         .venv/bin/python {Path(__file__).name} "
-              f"--config {HERE / 'provider.local.toml'}")
+              f"--config {HERE / 'providers.local'}")
         for label in ("B01~B10 联网用例（MiniMax-M3 / deepseek-v4-flash 真实调用）",):
             skip(label, "配置里 api_key 仍是占位符（REPLACE_ME）")
         return
@@ -1335,7 +1517,7 @@ def run_runtime_cases() -> None:
 
     # ---------------------------------------------------------------- B01
     step("B01  默认 provider（MiniMax-M3）端到端 invoke（§2.4 应用层抽象）")
-    cfg = load_provider_toml(CONFIG_PATH)
+    cfg = load_providers_dir(CONFIG_DIR)
     print(f"  default_provider = {cfg.provider_id} / default_model = {cfg.model_id}")
     minimax_resp: AIMessage | None = None
     model = None
@@ -1412,13 +1594,20 @@ def run_runtime_cases() -> None:
 
     # ---------------------------------------------------------------- B04
     step("B04  deepseek-v4-flash 走专用 ChatDeepSeek → reasoning_content 保留（§3.2 / §5.3）")
-    # 直接复用 provider.toml 里真实的 [deepseek] 节，只把默认 provider/model 切过去
-    text = CONFIG_PATH.read_text(encoding="utf-8")
-    text = text.replace('default_provider = "MiniMax"', 'default_provider = "deepseek"')
-    text = text.replace('default_model = "MiniMax-M3"', 'default_model = "deepseek-v4-flash"')
-    path = _write_temp_toml(text)
+    # 直接复用 providers/ 里真实的 deepseek.toml，只把默认 provider/model 切过去
+    files = {
+        GLOBAL_FILE: (
+            'default_provider = "deepseek"\n'
+            'default_model = "deepseek-v4-flash"\n'
+        ),
+    }
+    for src_file in sorted(CONFIG_DIR.glob("*.toml")):
+        if src_file.name == GLOBAL_FILE:
+            continue
+        files[src_file.name] = src_file.read_text(encoding="utf-8")
+    directory = _write_temp_providers(files)
     try:
-        ds_cfg = load_provider_toml(path)
+        ds_cfg = load_providers_dir(directory)
         print(f"  读到 provider_id={ds_cfg.provider_id} model_id={ds_cfg.model_id} "
               f"api_host={ds_cfg.section.api_host}")
         ds_model = build_chat_model(ds_cfg, http_client=wire.client())
@@ -1438,7 +1627,11 @@ def run_runtime_cases() -> None:
     except Exception as e:  # noqa: BLE001
         check("B04 deepseek reasoning_content 验证", False, f"{type(e).__name__}: {str(e)[:200]}")
     finally:
-        path.unlink(missing_ok=True)
+        # 只清理临时目录——**绝不删 CONFIG_DIR 里的任何文件**
+        # （⚠️ 曾经的 bug：这里写的是 `path.unlink()`，而 `path` 是上面 for 循环
+        #   遗留的循环变量，指向 CONFIG_DIR 的**最后一个** provider 文件
+        #   → 真跑在线模式会把用户的 providers.local/minimax.toml 直接删掉）
+        _cleanup_temp_providers(directory)
 
     # ---------------------------------------------------------------- B05
     step("B05  对照实验：同一个 deepseek-v4-flash 改走 ChatOpenAI + base_url")
@@ -1470,23 +1663,26 @@ def run_runtime_cases() -> None:
 
     # ---------------------------------------------------------------- B06
     step("B06  deepseek-v4-flash 流式（TOML 里 stream = true 生效）")
-    stream_toml = (
-        'default_provider = "deepseek"\n'
-        'default_model = "deepseek-v4-flash"\n'
-        "\n"
-        "[deepseek]\n"
-        f'api_key = "{_deepseek_api_key()}"\n'
-        'api_host = "https://api.deepseek.com/v1"\n'
-        "stream = true\n"
-        "temperature = 1.0\n"
-        "max_tokens = 4096\n"
-        "\n"
-        "[deepseek.models.deepseek-v4-flash]\n"
-        "max_tokens = 4096\n"
-    )
-    path = _write_temp_toml(stream_toml)
+    stream_files = {
+        GLOBAL_FILE: (
+            'default_provider = "deepseek"\n'
+            'default_model = "deepseek-v4-flash"\n'
+        ),
+        "deepseek.toml": (
+            "enabled = true\n"
+            f'api_key = "{_deepseek_api_key()}"\n'
+            'api_host = "https://api.deepseek.com/v1"\n'
+            "stream = true\n"
+            "temperature = 1.0\n"
+            "max_tokens = 4096\n"
+            "\n"
+            "[models.deepseek-v4-flash]\n"
+            "max_tokens = 4096\n"
+        ),
+    }
+    directory = _write_temp_providers(stream_files)
     try:
-        ds_stream_cfg = load_provider_toml(path)
+        ds_stream_cfg = load_providers_dir(directory)
         stream_model = build_chat_model(ds_stream_cfg, http_client=wire.client())
         print(f"  从 TOML 读到 stream = {ds_stream_cfg.section.stream}")
         print(f"  model.streaming    = {getattr(stream_model, 'streaming', None)}"
@@ -1502,7 +1698,7 @@ def run_runtime_cases() -> None:
     except Exception as e:  # noqa: BLE001
         check("B06 流式验证", False, f"{type(e).__name__}: {str(e)[:200]}")
     finally:
-        path.unlink(missing_ok=True)
+        _cleanup_temp_providers(directory)
 
     # ---------------------------------------------------------------- B07
     step("B07  exit code 映射（§4.3.1）：错误 api_key → 鉴权类 → exit 90")
@@ -1614,24 +1810,47 @@ def extract_thinking(response: AIMessage) -> tuple[str, str]:
 
 
 def _deepseek_api_key() -> str:
-    """从当前配置文件读 deepseek 的 key（demo 不额外引入密钥来源，不读 env var）。"""
-    raw = tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    return load_api_key(raw.get("deepseek"))
-
-
-def _find_placeholder_keys(path: Path) -> list[str]:
-    """找出配置里仍是占位符的 api_key（脱敏版 provider.toml 自带）。"""
+    """从当前配置**目录**读 deepseek 的 key（demo 不额外引入密钥来源，不读 env var）。"""
+    path = CONFIG_DIR / "deepseek.toml"
     try:
         raw = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError):
-        return []
-    hits = []
-    for provider_id, section in raw.items():
-        if not isinstance(section, dict):
+        return ""
+    return load_api_key(raw)
+
+
+def _snapshot_config_dir() -> dict[str, int]:
+    """给 CONFIG_DIR 拍个快照（文件名 → 字节数），用于运行后校验配置没被改动。"""
+    if not CONFIG_DIR.is_dir():
+        return {}
+    return {p.name: p.stat().st_size for p in sorted(CONFIG_DIR.glob("*")) if p.is_file()}
+
+
+def _verify_config_dir_untouched(before: dict[str, int]) -> list[str]:
+    """对比快照 → 返回被删 / 被改的配置文件名（空 = 配置完好）。"""
+    after = _snapshot_config_dir()
+    problems: list[str] = []
+    for name, size in before.items():
+        if name not in after:
+            problems.append(f"被删除：providers/{name}")
+        elif after[name] != size:
+            problems.append(f"被修改：providers/{name}")
+    return problems
+
+
+def _find_placeholder_keys(directory: Path) -> list[str]:
+    """找出配置里仍是占位符的 api_key（脱敏版 providers/ 自带）。"""
+    hits: list[str] = []
+    for path in sorted(directory.glob("*.toml")):
+        if path.name == GLOBAL_FILE:
             continue
-        key = section.get("api_key")
+        try:
+            raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError):
+            continue
+        key = raw.get("api_key")
         if isinstance(key, str) and "REPLACE_ME" in key:
-            hits.append(f"[{provider_id}].api_key = {key!r}")
+            hits.append(f"providers/{path.name}: api_key = {key!r}")
     return hits
 
 
@@ -1647,8 +1866,8 @@ def main() -> int:
     parser.add_argument(
         "--config",
         default=None,
-        help="provider.toml 路径（默认 = 同目录的脱敏版 provider.toml）。"
-             "跑联网用例时请指向含真实密钥的 provider.local.toml（已 gitignore）。",
+        help="providers/ 配置**目录**路径（默认 = 同目录的脱敏版 providers/）。"
+             "跑联网用例时请指向含真实密钥的 providers.local/（已 gitignore）。",
     )
     parser.add_argument(
         "--proxy",
@@ -1660,19 +1879,30 @@ def main() -> int:
     )
     args = parser.parse_args()
     PROXY_MODE = args.proxy
-    global CONFIG_PATH
+    global CONFIG_DIR
     if args.config:
-        CONFIG_PATH = Path(args.config).expanduser().resolve()
+        CONFIG_DIR = Path(args.config).expanduser().resolve()
 
     print(__doc__ or "")
-    print(f"TOML 配置文件 = {CONFIG_PATH}")
+    print(f"providers 配置目录 = {CONFIG_DIR}")
     print(f"网络出口模式   = {PROXY_MODE}")
     sanitize_proxy_env(PROXY_MODE)
+
+    config_before = _snapshot_config_dir()
 
     if not args.runtime_only:
         run_load_cases()
     if not args.offline:
         run_runtime_cases()
+
+    # 配置目录完整性校验——demo 绝不允许改动 / 删除用户的 provider 配置
+    touched = _verify_config_dir_untouched(config_before)
+    if touched:
+        print("\n  ⚠️⚠️ 配置目录被改动（demo 不应有此行为）：")
+        for t in touched:
+            print(f"     - {t}")
+    else:
+        print(f"\n  ✓ 配置目录完好（{len(config_before)} 个文件未改动）")
 
     banner("汇总")
     print(f"  PASS = {len(PASSED)}   FAIL = {len(FAILED)}   SKIP = {len(SKIPPED)}")
