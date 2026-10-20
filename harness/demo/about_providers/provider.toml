@@ -1,0 +1,142 @@
+# =============================================================================
+# provider.toml —— workspace 模型配置文件（demo 裁剪版 · **已脱敏**）
+# =============================================================================
+#
+# 🔒 本文件**已脱敏**（api_key = 占位符），**可以安全提交 git**。
+#    真实密钥请写到同目录的 `provider.local.toml`（已加入 .gitignore），
+#    然后用 `--config provider.local.toml` 跑 demo：
+#
+#        cp provider.toml provider.local.toml     # 复制一份
+#        # 编辑 provider.local.toml，把两处 api_key 换成真实 key
+#        .venv/bin/python harness/demo/about_providers/provider.py \
+#            --config harness/demo/about_providers/provider.local.toml
+#
+#    （设计文档 §9.3 的"脱敏模板 + 独立渠道分发"范式；§9.2 的"api_key 仅 TOML 明文"立场
+#     在真实配置文件里依然成立——demo **不读任何环境变量**取 key。）
+#
+# 本文件验证《大模型 TOML 参数设计》v2.5 的核心主张：
+#   1. 每个 provider 一个独立 TOML schema（V2-P1）——无统一 [provider] 表
+#   2. api_key 仅 TOML 明文，不读环境变量（V2-P2）
+#   3. api_host 对所有 provider 可选（V2-P3）
+#   4. 字段拼写错误在 F002 load 阶段就报错（V2-P5）
+#   5. 解析层复用 LangChain 官方类，零自研（§3.2 / §15）
+#
+# 配套代码：harness/demo/about_providers/provider.py
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 顶层：全局默认
+# -----------------------------------------------------------------------------
+
+# 默认 provider_id。必填。取值必须落在设计文档 §3.1 的 v1 白名单（26 家）内。
+# 类型：str
+# 取值（本 demo 只用到 2 个）：
+#   MiniMax   —— OpenAI 兼容 + Coding Plan `sk-cp-` 密钥，走 ChatOpenAI + base_url
+#   deepseek  —— 专用 ChatDeepSeek，保留 reasoning_content
+# 不在白名单 → F002 load 报错（exit 11 / ProviderTomlScopeError）
+default_provider = "MiniMax"
+
+# 默认 model_id。必填。必须存在于 default_provider 节下的 models 表中，
+# 否则 F002 load 报错（exit 11 / ProviderTomlMissingModelError）。
+# 类型：str
+default_model = "MiniMax-M3"
+
+
+# -----------------------------------------------------------------------------
+# [MiniMax] —— MiniMax M3（OpenAI 兼容协议 + Coding Plan `sk-cp-` 密钥）
+# -----------------------------------------------------------------------------
+# 走 LangChain: ChatOpenAI + base_url（设计文档 §3.6 / §15.2）。
+# thinking 以 <think>...</think> 标签原样保留在 AIMessage.content，
+# 应用层用正则提取（§3.6.5）。
+#
+# 端点差异：
+#   - https://api.minimaxi.com/v1    → OpenAI 兼容（Coding Plan 默认；用 ChatOpenAI）✅ v1
+#   - https://api.minimax.io/anthropic → Anthropic SDK 兼容（普通 API key；v2+ 才支持）
+[MiniMax]
+
+# 鉴权密钥。必填（**C 档云端 provider**：空 → F002 硬错 exit 11，见设计文档 §9.2 分档表）。
+# 类型：str
+# 鉴权：解析层加 "Authorization: Bearer <api_key>" header
+# ⚠️ 本文件是**脱敏版**（占位符）——真实 key 写进 provider.local.toml（已 gitignore）
+api_key = "sk-cp-REPLACE_ME"
+
+# 自定义 API 端点。选填。
+# 类型：str (URL)
+# 默认："https://api.minimaxi.com/v1"（Coding Plan OpenAI 兼容端点）
+api_host = "https://api.minimaxi.com/v1"
+
+# 请求超时（秒）。选填。默认 60。
+timeout = 60
+
+# 重试次数。选填。默认 6（LangChain 全局默认）。
+max_retries = 6
+
+# 默认 temperature。选填。默认 1.0。范围：[0.0, 2.0]（OpenAI 协议硬边界）
+temperature = 0.7
+
+# 默认 max_tokens。选填。
+max_tokens = 4096
+
+# 流式开关。选填。默认 true。
+# true → 模型构造时 streaming=True（invoke 也走 SSE）；false → 单次 JSON 响应
+stream = false
+
+# MiniMax 专属：reasoning_split 高级控制位。选填，默认 false（= 不下发）。
+# 类型：bool | null
+# 说明：true 时服务端把思考链移到独立的 reasoning_content 字段，而 ChatOpenAI
+# 不解析该非标字段 → 思考链丢失（设计文档 §3.6.4 明确「不推荐」）。
+# false 时思考链留在 content 的 <think> 标签内 → 应用层正则可提取。
+# 这里显式声明为 schema 字段（而非 [provider.extra] 自由透传口），符合 V2-P5。
+reasoning_split = false
+
+# 该 provider 下注册的模型（每个模型一个子表，模型级参数覆盖 provider 级默认值）
+[MiniMax.models.MiniMax-M3]
+max_tokens = 8192
+temperature = 0.7
+
+# ⚠️ 注意：model_id 含 "." 时必须加引号，否则 TOML 把它解析成嵌套表
+#    （`MiniMax-M2` → `7`），模型表结构被静默破坏（见 provider.py 负例 A11）。
+[MiniMax.models."MiniMax-M2.7"]
+max_tokens = 4096
+temperature = 0.7
+
+
+# -----------------------------------------------------------------------------
+# [deepseek] —— DeepSeek（专用 LangChain 类：ChatDeepSeek）
+# -----------------------------------------------------------------------------
+# 走 LangChain: ChatDeepSeek（langchain-deepseek）——保留 reasoning_content。
+# 禁止走 ChatOpenAI + base_url，否则推理过程会被丢弃（设计文档 §3.2 关键警告 / §5.3）。
+[deepseek]
+
+# 鉴权密钥。必填（**C 档云端 provider**：空 → F002 硬错 exit 11，见设计文档 §9.2 分档表）。
+# 类型：str
+api_key = "sk-REPLACE_ME"
+
+# 自定义 API 端点。选填。
+# 类型：str (URL)
+# 默认："https://api.deepseek.com/v1"（ChatDeepSeek 的 DEFAULT_API_BASE）
+api_host = "https://api.deepseek.com/v1"
+
+timeout = 60
+max_retries = 6
+
+# DeepSeek 官方推荐 temperature = 1.0（推理模型请勿降温）
+temperature = 1.0
+max_tokens = 4096
+
+stream = false
+
+# DeepSeek 专属：推理深度。选填。
+# 类型：str —— "low" | "medium" | "high"
+# 说明：透传给 OpenAI 兼容请求体的 reasoning_effort 字段；
+#       真实模型是否接受该字段由服务端决定（见 provider.py 运行日志）。
+reasoning_effort = "medium"
+
+[deepseek.models.deepseek-v4-flash]
+max_tokens = 4096
+temperature = 1.0
+
+[deepseek.models.deepseek-chat]
+max_tokens = 8192
+temperature = 1.0

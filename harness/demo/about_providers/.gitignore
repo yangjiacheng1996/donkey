@@ -1,0 +1,10 @@
+# 真实密钥配置（**不入 git**）——从 provider.toml 复制后填入真实 api_key
+#
+#   cp provider.toml provider.local.toml
+#   # 编辑下面两处 api_key
+#   .venv/bin/python harness/demo/about_providers/provider.py \
+#       --config harness/demo/about_providers/provider.local.toml
+#
+# 本文件遵循设计文档 §9.2「api_key 仅 TOML 明文，不读环境变量」——
+# demo 不会从任何环境变量里取 key。
+provider.local.toml

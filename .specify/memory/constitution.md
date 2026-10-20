@@ -1,7 +1,13 @@
 # donkey 宪法（初稿）
 
-> 本文档是 donkey 项目的最高治理规则，由 Maintainer 立项书 v1.0 草稿中"不可妥协"原则沉淀而来。
-> 与立项书冲突时，以本宪法为准；与本宪法冲突的代码 / 文档 / 流程一律无效，须按 Governance §治理 流程修订。
+> 本文档是 donkey 项目的最高治理规则，由 Maintainer 立项书中的"不可妥协"原则沉淀而来。
+> 与立项书冲突时，以本宪法为准；与本宪法冲突的代码 / 文档 / 流程一律无效，须按 Governance 流程修订。
+
+**关联文档索引**：
+- 立项书：`harness/features/立项书.md`
+- Phase 进度与映射：`harness/features/README.md`
+- sqlite schema 权威：`harness/report/sessions_sqlite表结构一览.md`
+- 长期记忆选型：`harness/report/Saver和Store.md`
 
 ---
 
@@ -19,18 +25,18 @@
 
 | 编号 | 条款 | 来源 |
 |---|---|---|
-| **N-01** | workspace 内**禁止**出现 `agent.py` / `main.py` 或任何 Python 入口文件 | 立项书 §3.4 + 附录 F |
-| **N-02** | **禁止** subagent / 子智能体相关目录或字段（哲学："agent = 人"，不存在把人降级为子工具的概念） | 立项书 §1.2.3 + §1.5.5 + 附录 F |
-| **N-03** | `donkey.core` **禁止** import 任何 client（cli / web / gui） | 立项书 §4.1.1 + 附录 F |
-| **N-04** | `cli` **禁止**直接 import `langchain` / `langgraph` / `sqlite3`；所有 LangChain / LangGraph / sqlite3 调用封在 `donkey/core/` 内（web / gui 客户端同理） | 立项书 §4.1.1 + §5.5.6 + 附录 F |
-| **N-05** | `donkey.core` **禁止** import `argparse` / `sys.argv` / `click` / `typer`（保持业务 / 客户端边界） | 立项书 §4.1.1 + 附录 F |
-| **N-06** | `donkey load` 失败时 exit code **非 0**，但**不得**修改 workspace 中任何文件 | 立项书附录 F |
-| **N-07** | `donkey load` 不依赖 `init`：用户可跳过 `init` 直接跑 load，load 必须检测并清晰报告"未 init" | 立项书附录 F |
-| **N-08** | `donkey` 全子命令 exit code 段位空间严格不重叠（详见第 4 章 §4.4） | 立项书 §5.5.3 + 附录 F |
-| **N-09** | `donkey session` 的**对外标识是标题**，thread_id 仅作内部引用 | 立项书 §5.5.4 + 附录 F |
-| **N-10** | `donkey session new` 默认标题"无标题会话"；若给了首轮 prompt，**必须**在 `donkey.core.api.new_session` **内部**由 LLM 总结 ≤ 20 字标题并写回 sqlite3；**严禁**实现为 `before_agent` 中间件（**不**进 Agent Loop 图，**不**新增 LangGraph 节点，**不**触发版本号 `x+1`） | 立项书 §5.5.4.2 + §5.5.4.5 + 附录 F |
-| **N-11** | v1 **必须**同时交付 cli / web / gui 三种客户端，缺一不可；任何客户端**不**允许出现"功能仅 cli 独有"的情况 | 立项书 §1.5.3 + §3.2.1 + §5.5.6 + 附录 F |
-| **N-12** | **禁止**使用任何 LangSmith 相关代码（包含但不**限于** `langsmith` 包 / LangSmith Cloud / Studio UI / Tracing / Deployment / Hub / `langchain[langsmith]` extras / `LANGSMITH_TRACING` 等环境变量）；**禁止**直接 `import langsmith` 或任何 langsmith.* 子包（包括用于诊断智能体的场景） | 立项书 §1.5.5 + §2.1 + 调研 `harness/report/全开源最佳实践.md` §0 |
+| **N-01** | workspace 内**禁止**出现 `agent.py` / `main.py` 或任何 Python 入口文件 | 立项书 §3.4 |
+| **N-02** | **禁止** subagent / 子智能体相关目录或字段（哲学："agent = 人"，不存在把人降级为子工具的概念） | 立项书 §1.2.3 |
+| **N-03** | `donkey.core` **禁止** import 任何 client（cli / web / gui） | 立项书 §4.1.1 |
+| **N-04** | `cli` **禁止**直接 import `langchain` / `langgraph` / `sqlite3`；所有 LangChain / LangGraph / sqlite3 调用封在 `donkey/core/` 内（web / gui 客户端同理） | 立项书 §4.1.1 |
+| **N-05** | `donkey.core` **禁止** import `argparse` / `sys.argv` / `click` / `typer`（保持业务 / 客户端边界） | 立项书 §4.1.1 |
+| **N-06** | `donkey load` 失败时 exit code **非 0**，但**不得**修改 workspace 中任何文件 | 立项书 §5.5.3 |
+| **N-07** | `donkey load` 不依赖 `init`：用户可跳过 `init` 直接跑 load，load 必须检测并清晰报告"未 init" | 立项书 §5.5.3 |
+| **N-08** | `donkey` 全子命令 exit code 段位空间严格不重叠（详见第 4 章 §4.4） | 立项书 §5.5.3 |
+| **N-09** | `donkey session` 的**对外标识是标题**，thread_id 仅作内部引用 | 立项书 §5.5.4 |
+| **N-10** | `donkey session new` 默认标题"无标题会话"；若给了首轮 prompt，**必须**在 `donkey.core.api.new_session` **内部**由 LLM 总结 ≤ 20 字标题并写回 sqlite3；**标题总结失败 / 超时时必须回退为首轮 prompt 的前 20 字**（**严禁**回退成"无标题会话"——不允许出现"Agent Loop 已启动但标题仍是占位符"的状态）；**严禁**实现为 `before_agent` 中间件（**不**进 Agent Loop 图，**不**新增 LangGraph 节点，**不**触发版本号 `x+1`） | 立项书 §5.5.4.5 |
+| **N-11** | v1 **必须**同时交付 cli / web / gui 三种客户端，缺一不可；任何客户端**不**允许出现"功能仅 cli 独有"的情况 | 立项书 §5.5.6 |
+| **N-12** | **禁止**使用任何 LangSmith 相关代码（包含但不**限于** `langsmith` 包 / LangSmith Cloud / Studio UI / Tracing / Deployment / Hub / `langchain[langsmith]` extras / `LANGSMITH_TRACING` 等环境变量）；**禁止**直接 `import langsmith` 或任何 langsmith.* 子包（包括用于诊断智能体的场景） | `harness/report/全开源最佳实践.md` §0 |
 
 ---
 
@@ -47,7 +53,7 @@
 
 1. 换 workspace 可以改变人格 / Skills / 工具 / 模型，但**不能**把 donkey 变成 OpenCode（diff、路径权限等能力不可配置）；
 2. 需要引擎层能力的用户，**唯一官方路线是 fork** —— donkey 不通过配置提供这些能力；
-3. 编程型 workspace 提供的是**编程人格 / Skills / 工具 / 模型**（材料层），官方模板**不承诺**提供 diff 审阅（§立项书 1.2.3 结论 3 + AC-5）。
+3. 编程型 workspace 提供的是**编程人格 / Skills / 工具 / 模型**（材料层），官方模板**不承诺**提供 diff 审阅（AC-5）。
 
 ### 2.2 路径绝对化原则（§立项书 1.2.2 P3）
 
@@ -57,10 +63,9 @@
 
 ### 2.3 workspace 原子性原则（§立项书 1.2.2 P1+P2）
 
-- **一个 workspace 目录 = 一个 Agent**（[D-01]）；
-- workspace 自带 manifest（[D-01]）；
-- 依赖与配置随 workspace 走；运行数据可选择性导出（[D-02]）；
-- workspace 有格式版本号，donkey 升级时提供迁移路径（[D-03]）。
+- **一个 workspace 目录 = 一个 Agent**，workspace 自带 manifest；
+- 依赖与配置随 workspace 走；运行数据可选择性导出；
+- workspace 有格式版本号，donkey 升级时提供迁移路径。
 
 ### 2.4 Skills 三层渐进披露原则（§立项书 1.2.4）
 
@@ -91,6 +96,8 @@
 ### 2.6 workspace 目录必填项（§立项书 4.6.1）
 
 **必须存在**：`instruction.md` / `provider.toml` / `tools/` / `mcp/mcp.json` / `skills/` / `memory/`
+
+**另由 `donkey init` 生成（donkey 自管，非用户材料）**：`<workspace>/manifest.json` —— D-01 的 workspace manifest，字段最少化（`version` / `name` / `created_at` / `donkey_version`）。它与**包内**的 `core/workspace/templates/manifest.json`（模板文件清单）**是两个不同的文件**，前者落在 workspace 根，后者落在 donkey 安装包内。
 
 **显式排除**（workspace 内不出现）：
 - ❌ `agent.py` / `main.py` / 任何 Python 入口
@@ -160,27 +167,31 @@
 | 语言 | Python 3.11+ | LangChain / LangGraph 官方语言；`tomllib` 内置 |
 | Agent 框架 | LangChain 1.x `create_agent` | 直接返回编译图，中间件插件化（`agents.md:19`） |
 | 图运行时 | LangGraph 当前稳定版 | 业内事实标准 |
-| 短期记忆 | LangGraph `SqliteSaver` 落盘 `memory/checkpoint.sqlite3` | 唯一零配置本地文件选项 |
-| 长期记忆 | v1~v2：LangGraph `InMemoryStore`（进程重启即丢，仅开发 / 测试）；v3：自研 `SqliteStore` | LangGraph 官方无 SQLite Store（见调研 `Saver和Store.md` §2.1） |
+| **短期记忆** | `donkey init` 阶段 schema builder 创建 `memory/sessions.sqlite3`（**单文件双表**：SqliteSaver 自有 `checkpoints` / `writes` + donkey 自管 `sessions_metadata` + 2 索引）；运行期 `SqliteSaver` 落盘历史 + `core.api.new_session` 写元数据（INSERT，**不**重复 `CREATE TABLE`）；长期 / 知识库另列（`store.sqlite3` v3 / `knowledge.sqlite3` v3+ 占位）<br><br>**`sessions_metadata` 6 字段**：`thread_id` ↔ `title` + `created_at` / `updated_at` / `donkey_version` / `first_prompt`（N-09 / N-10 实现机制；详见 `harness/report/sessions_sqlite表结构一览.md` §2.2）<br><br>**`--force` = 恢复出厂设置**：删 + 重建 sqlite3（含 schema），用户须在 `--force` 前手动备份（`cp memory/*.sqlite3 /tmp/backup-*.sqlite3`）；"运行数据可选择性导出"仍生效——sqlite3 模板身份 ≠ 必须导出 | 唯一零配置本地文件选项；`sessions_metadata` 提供 title ↔ thread_id 映射 + 元数据持久化；F002-P2 `SqliteSchemaError` (exit 16) 通过 **5 项断言**（`PRAGMA table_info(checkpoints)` + `PRAGMA table_info(writes)` + `PRAGMA table_info(sessions_metadata)` 6 字段 + 2 索引名 + `PRAGMA integrity_check`）判定 schema 健康（口径以 `harness/report/sessions_sqlite表结构一览.md` §7 为准） |
+| 长期记忆 | v1~v2：LangGraph `InMemoryStore`（进程重启即丢，仅开发 / 测试）；v3：自研 `SqliteStore`（仿照 PostgresStore） | LangGraph 官方无 SQLite Store（见 `Saver和Store.md` §2.1；自研 SqliteStore 详细 SQLite 端口三处适配：`namespace` 数组→JSON 字符串 + `value` JSONB→TEXT + GIN→json_each/FTS5，详见 `sessions_sqlite表结构一览.md` §3.3） |
 | MCP | LangChain `MCPAdapter` + `MCPConfig` dict | 官方推荐 / 跨编辑器通用 |
 | 配置格式 | TOML | LangChain / LangGraph 生态趋势 |
-| CLI | `argparse`（stdlib） | 不引入 typer / click 以保持业务 / 客户端边界（§N-05） |
-| 测试 | pytest + LangChain 内置测试模式 | 社区标准 |
+| CLI | `argparse`（stdlib） | 不引入 typer / click 以保持业务 / 客户端边界（N-05） |
+| 测试 | pytest + LangChain 内置测试模式；测试代码放在 `tests/` 目录（与 `core/` / `cli/` / `web/` / `gui/` 同级；分 unit / integration / e2e/phase 三层；**`tests/e2e/phase/verify_phase_<f>_<n>.py` 黑盒测试**——只跑 `subprocess.run(["donkey", ...])` 验证 exit code 与文件系统副作用，**不** import `donkey.*` 业务代码） | 社区标准 |
 
 ### 3.2 永不使用清单
 
-- ❌ **LangSmith** 任何形态（详见 §N-12）：**禁止**使用 LangSmith Cloud / Studio UI / Tracing / Deployment / Hub / `langchain[langsmith]` extras / `LANGSMITH_TRACING` 等环境变量；**禁止**在 `donkey.core` / cli / web / gui 任何代码路径中 `import langsmith` 或 `import langchain.langsmith / langchain_community.langsmith / langgraph.langsmith` 等任何 langsmith.* 子包（包括但不限于为了"诊断智能体"或"打印运行轨迹"等用途）—— 智能体诊断统一通过 `donkey.core` 自有输出（stdout 日志 / 事件流 / 后续自研 tracer）实现，受 `harness/report/全开源最佳实践.md` §0 约束；
+- ❌ **LangSmith** 任何形态（详见 N-12）：**禁止**使用 LangSmith Cloud / Studio UI / Tracing / Deployment / Hub / `langchain[langsmith]` extras / `LANGSMITH_TRACING` 等环境变量；**禁止**在 `donkey.core` / cli / web / gui 任何代码路径中 `import langsmith` 或 `import langchain.langsmith / langchain_community.langsmith / langgraph.langsmith` 等任何 langsmith.* 子包（包括但不限于为了"诊断智能体"或"打印运行轨迹"等用途）—— 智能体诊断统一通过 `donkey.core` 自有输出（stdout 日志 / 事件流 / 后续自研 tracer）实现，受 `harness/report/全开源最佳实践.md` §0 约束；
 - ❌ **deepagents** 包（含 `create_deep_agent` / FilesystemMiddleware / SubAgentMiddleware / RubricMiddleware / SkillsMiddleware / MemoryMiddleware）—— 见 §2.7.2；
 - ❌ **ShellToolMiddleware**（持久 shell + HITL 冲突）—— 由 `tools/commandline.py` 替代；
-- ❌ **subagent / 子智能体相关任何目录或字段**（`agent = 人`）—— §N-02；
-- ❌ **workspace 内 Python 入口文件**（`agent.py` / `main.py`）—— §N-01。
+- ❌ **subagent / 子智能体相关任何目录或字段**（`agent = 人`）—— N-02；
+- ❌ **workspace 内 Python 入口文件**（`agent.py` / `main.py`）—— N-01。
 
 ### 3.3 长期记忆硬约束
 
 - v1 / v2：**仅**使用 LangGraph `InMemoryStore`；接受"进程重启即丢"——v1 / v2 不需要长期记忆；
 - v3：自研 `SqliteStore`，**仿照 `langgraph-checkpoint-postgres` 的 `PostgresStore`** 实现（接口契约参考调研 `Saver和Store.md` §七 + §十二）；
 - 自研 Store **必须**显式继承 `BaseStore` 接口；
-- 自研 Store 落地时机由立项书 §4.10 TD-02 路线图决定，**不**挤占 v1 时间线。
+- 自研 Store 落地时机由立项书 §4.10 TD-02 路线图决定，**不**挤占 v1 时间线；
+- **SQLite 端口三处硬适配**（与 `sessions_sqlite表结构一览.md` §3.3 第 0 / 3 / 4 项对齐）：
+  1. **数组语法**：`namespace TEXT[]` → JSON 字符串 TEXT（如 `'["alice","memories"]'`，参考 `LangGraph_doc/stores.md:73`）；
+  2. **JSONB → TEXT**：`value JSONB` → `TEXT` + `json_extract` / `json_each`；
+  3. **GIN 索引** → SQLite 端：`json_each` 展开为虚拟表 + B-Tree / FTS5 / 自定义 LIKE 前缀函数 / 触发器（SQLite 无 GIN）。
 
 ### 3.4 Skills 三层加载硬约束
 
@@ -190,9 +201,9 @@
 
 ### 3.5 数据安全分级
 
-- `provider.toml.secret_key` **视为高敏感**；
+- `provider.toml` 各 provider 节的 `api_key`（per-provider 明文字段，**不读 env var**）**视为高敏感**；
 - `donkey load` 异常 / 默认错误输出**自动脱敏**（不打印密钥明文）；
-- workspace 凭据由用户自负；donkey 不上传 workspace 内容（§立项书 4.8.1）。
+- workspace 凭据由用户自负；donkey 不上传 workspace 内容。
 
 ---
 
@@ -207,7 +218,7 @@
 
 ### 4.2 Feature 划分与编号唯一性（§立项书 3.2.1 + 5.2）
 
-**F 编号是 donkey 全项目唯一权威 Feature 编号**，立项书 §3.2.1 + §5.2 + §10.3.2 Q-11 已统一：
+**F 编号是 donkey 全项目唯一权威 Feature 编号**，与立项书 §3.2.1 一一对应：
 
 | 编号 | 子命令 / 客户端 | 核心库 API |
 |---|---|---|
@@ -223,21 +234,37 @@
 
 ### 4.3 Phase 切分规则（§立项书 5.2.1）
 
-**核心原则**：Phase 是 Feature 内部的实施子阶段，**不再按一级命令划分**（一级命令已被 F 编号锁死）。Phase 按以下两条规则二选一进行切分：
+**核心原则**：Phase 是 Feature 内部的**开发阶段**（dev unit，1 次 `/speckit.specify` 闭环单位），**不再按一级命令划分**（一级命令已被 F 编号锁死）。Phase 与 exit code 子段在 v1 baseline 中 1:1 对齐（4 术语区分详见 README §1.5）：
 
-| 规则 | 适用 Feature | 切分单位 |
-|---|---|---|
-| **规则 A：按二级命令切** | 含二级命令的 Feature（如 F003 `donkey session list / new / remove / import`） | 每个二级命令 = 一个 Phase |
-| **规则 B：按退出码段位切** | 无二级命令的 Feature（如 F001 `donkey init`、F002 `donkey load`、F004 `donkey run`、F005 `donkey web` 7 子段、F006 `donkey gui` 3 子段） | 每 N 个连续退出码 = 一个 Phase（N 由该 Feature 失败场景数量决定） |
+| 规则 | 适用 Feature | 切分单位 | 产物 |
+|---|---|---|---|
+| **规则 A：按二级命令切** | 含二级命令的 Feature（如 F003 `donkey session list / new / remove / import`） | 每个二级命令 = 一个子段 = 一个 Phase（v1 baseline 1:1） | 1 子段 + 1 Phase + 1 提示词文件 + 1 verify 脚本 |
+| **规则 B：按退出码段位切** | 无二级命令的 Feature（如 F001 / F002 / F004 / F005 / F006） | 每 N 个连续退出码（落在该 Feature 段位内）= 一个子段 = 一个 Phase（v1 baseline 1:1；N 由该 Feature 失败场景数量决定） | 同上 |
+
+**4 术语严格分层**（详见 README §1.5）：
+
+| 术语 | 定义 | 视角 | 标识 |
+|---|---|---|---|
+| **Phase** | 开发阶段（1 次 `/speckit.specify` 闭环） | 开发 | `F###-P#` |
+| **段位** | 一个 Feature 拥有的 exit code 连续范围 | 错误 | `1-10` / `11-20` / `21-30` / `31-100` / `101-170` / `171-200` |
+| **子段** | 段位内的 exit code 子分组（Phase 在段位内占用的码范围，含已用 + 预留） | 错误 | `F001 子段 1` = exit 1-2 |
+| **Error class** | 具体 Python 异常类 | 代码 | `PathNotFoundError` 等 |
+
+**v1 baseline**：1 Phase = 1 子段 = 1 提示词文件 = 1 verify 脚本（27 Phase = 27 文件 / 27 脚本）；如未来某 Phase 工作量超出 1 次 `/speckit.specify` 闭环容量，Maintainer 显式决策拆 / 合（不自动推断，参见 README §12.2 备注）。
 
 **每设计一个 Phase 必带三要素**：
-1. **入口条件**：前置 Phase 的退出条件必须全部满足（可执行命令/测试验证通过）；
-2. **异常退出码**：该 Phase 失败时返回的 exit code（落在该 Feature 段位内，详见 §4.4 + 立项书 §5.5.3）；
-3. **退出条件**：可执行、可验证的硬指标（由 `verify_phase_<f>_<n>.py` 验证脚本跑出 PASS/FAIL，**不**依赖 Maintainer 主观判断）。
+1. **入口条件（Entry Gate）**：前置 Phase 的退出条件必须全部满足（可执行命令 / 测试验证通过；可能跨 Feature——按 §4.4 Speckit 协作方式滚动推进）；
+2. **异常退出码（Exit Code）**：该 Phase 覆盖的子段内 Error class 对应的 exit code 集合（落在该 Feature 段位内；具体码值见 §4.4 + 立项书 §5.5.3 + README §3 一览总表对应行）；
+3. **退出条件（Exit Gate）**：可执行、可验证的硬指标 —— 由 `verify_phase_<f>_<n>.py` 验证脚本跑出 PASS/FAIL，**不**依赖 Maintainer 主观判断。
+
+**Phase 编号规则**：
+- 同 Feature 内 Phase 编号严格串行、严格递增（`P1` → `P2` → `P3` …）；
+- Phase 编号**不**跨 Feature 复用（`F001-P1` 与 `F002-P1` 是两个不同 Phase）；
+- Phase 编号出现在 §3 一览总表行号、§X.Y 章节号、提示词文件名（`featurexxx_phasexxx_<phase_name>.md`）、verify 脚本名（`verify_phase_<f>_<n>.py`）。
 
 **Speckit 协作方式**：按跨 Feature 滚动推进 —— 同一时段并行多个 Feature 的同 Phase 任务；Feature 内部 Phase 严格串行。
 
-**废弃说明**：旧"Phase A = 骨架 / Phase B = 完整"两段式切分方式已**弃用**——"骨架"与"完整"是主观形容词，不可量化；新方案一律按规则 A（二级命令）或规则 B（退出码段位）切分。具体 Phase 编号、退出码分配、退出条件细节在各自 Feature spec 中规定；宪法与立项书 §5.2.1 只规定**切分原理**，**不**展开具体编号。
+具体 Phase 编号、退出码分配、退出条件细节在各自 Feature spec（即 README §3 / §4 / §6 / §7 / §8 / §9）中规定；宪法与立项书 §5.2.1 只规定**切分原理**，**不**展开具体编号。
 
 ### 4.4 exit code 段位分配总表（§立项书 §5.5.3 + N-08）
 
@@ -273,7 +300,8 @@
 - `0` 是唯一正常返回码；任何 `> 0` 都视为失败；
 - `201+` 留给未来大版本 —— 每个大版本占 100 个码值（含 1 个正常返回）；
 - `donkey load` 段位起点 `11`（与 F002 域一致），9 项 hard error 占 `11-19`，`20` 留冗余；
-- **warning 不计入失败**（如 `provider.toml.secret_key` 缺失但 `LLM_API_KEY` 已设）—— `--strict-warnings` 列入 v2 候选。
+- **warning 不计入失败**（如 `provider.toml` 某 provider 节 `temperature` 软越界 / `openai-compatible` 的空 `api_key`）—— `--strict-warnings` 列入 v2 候选；
+- **"不读 env var"立场的边界**：该立场只约束**凭据**（`api_key` 等），**网络出口**仍由本机环境决定——httpx / openai SDK 默认读取 `ALL_PROXY` / `HTTPS_PROXY` / `HTTP_PROXY` 等代理变量。donkey **不主动读、不主动写**这些变量，但必须在构造任何 client 前做一次**防御性检查**（识别 httpx 不认的 `socks://` scheme / 缺 `socksio` 扩展并降级），否则用户本机代理配置会让所有 provider 调用在**构造期**直接失败。详见 `harness/report/大模型toml参数设计.md` §9.4。
 
 **多错误优先级**：load 检查按 §立项书 5.5.3 检查清单顺序逐项执行，遇到第一个 hard error 立即返回 —— `exit_code` 取该错误码值，**不**累积多错误码。
 
@@ -294,7 +322,7 @@
 - **AC-4**：换 workspace 后模型 / 工具 / Skills / 提示词全部随之切换，**无需重启 donkey**；
 - **AC-5**：v1 官方模板**不承诺**提供 diff 审阅 / 路径权限交互等引擎层能力。
 
-**业务验收**：AC-1 ~ AC-5 全部通过；三套官方模板 workspace（通用型 / 编程型 / 技能型）各跑通 1 条主流程；cli / web / gui 三种客户端均通过 e2e。
+AC-1 ~ AC-5 全部通过；三套官方模板 workspace（通用型 / 编程型 / 技能型）各跑通 1 条主流程；cli / web / gui 三种客户端均通过 e2e。
 
 **技术验收**：所有 `donkey` 子命令 exit code 与本宪法 §4.4 完全一致；引擎核心 LangGraph 图在 24 小时持续运行测试中无未捕获异常。
 
@@ -309,12 +337,21 @@
 
 > 本章沉淀立项书附录 F 中的 `[D-xx]` 决策；任何 `D-xx` 一经纳入**不**可删除，仅可修订。
 
-| 编号 | 决策 |
-|---|---|
-| **[D-01]** | 一个 workspace 目录 = 一个 Agent；workspace 自带 manifest |
-| **[D-02]** | 依赖与配置随 workspace 走；运行数据可选择性导出 |
-| **[D-03]** | workspace 有格式版本号，donkey 升级时提供迁移路径 |
-| **[D-13]** | 提供 fork 指南（配置边界 / 适配层说明 / 扩展点清单） |
+| 编号 | 决策 | 来源 |
+|---|---|---|
+| **[D-01]** | 一个 workspace 目录 = 一个 Agent；workspace 自带 manifest（仅 `version` / `name` / `created_at` / `donkey_version` 四字段最少化） | 立项书 §1.2.2 P1 |
+| **[D-02]** | 依赖与配置随 workspace 走；运行数据（含 `memory/*.sqlite3`）可选择性导出——"模板身份" ≠ "必须导出" | 立项书 §1.2.2 P2 |
+| **[D-03]** | workspace 有格式版本号，donkey 升级时提供迁移路径；`sessions_metadata.donkey_version` 列作为迁移提示 | 立项书 §1.3 |
+| **[D-04]** | `cli` / `web` / `gui` 客户端**禁止**直接 import `langchain` / `langgraph` / `sqlite3`（N-04） | N-04 |
+| **[D-05]** | `donkey init` 在 init 阶段**程序化构造 sqlite3 schema**（非携带二进制模板）——sessions.sqlite3 由 `SqliteSaver(conn).setup()` + donkey 自管表组成；store.sqlite3 / knowledge.sqlite3 v1 仅空文件占位，schema 推迟 v3 SqliteStore / RAG 引擎选型 | `sessions_sqlite表结构一览.md` |
+| **[D-06]** | donkey 不依赖 LangSmith 任何形态（Cloud / Studio / Tracing / Deployment / Hub / `langchain[langsmith]` extras / `LANGSMITH_*` 环境变量 / `import langsmith.*`）；用 `stream_mode` + 自定义 Middleware + 标准 OpenTelemetry / Logging 替代 | N-12 + `全开源最佳实践.md` |
+| **[D-07]** | Skills frontmatter 严格仅 `name` + `description` 两必填字段；不允许自定义字段（`when_to_use` / `version` / `tags` 等） | 立项书 §1.2.4 |
+| **[D-08]** | 客户端三端（cli / web / gui）共用 `donkey.core.api` 库 API，不重复实现业务逻辑；开发顺序：CLI → Web → GUI | N-11 |
+| **[D-09]** | Donkey v1 不依赖 `deepagents` 包（违反 N-02 / N-12 一致性）；Skills 加载器自研 | 立项书 §1.2.4 |
+| **[D-10]** | workspace 内**禁止**出现 `agent.py` / `main.py` 或任何 Python 入口文件（`创建 agent 的唯一官方入口` = `donkey.core.api.create_agent`） | N-01 |
+| **[D-11]** | donkey 的 `store.sqlite3` / `knowledge.sqlite3` v1 仅占位空文件——不建占位表、不挂 store、donkey 本体不读；v3 SqliteStore 由 Maintainer 启动时实施 | 立项书 §4.10 TD-02 |
+| **[D-12]** | F002 load 9 项硬检查失败 → `exit code ≠ 0`，但**不修改** workspace 中任何文件（"load 失败不改 workspace"原则，N-06） | N-06 |
+| **[D-13]** | 提供 fork 指南（配置边界 / 适配层说明 / 扩展点清单）——"改引擎请 fork"是 §1.1 项目身份的核心 | 立项书 §1.1 |
 
 ---
 
@@ -324,7 +361,7 @@
 
 - 本宪法**凌驾**于 donkey 仓库内其他实践之上；
 - 与本宪法冲突的代码 / 文档 / 流程一律无效；
-- 任何 spec / plan / tasks / 代码 / 文档提交前**必须**对照 §1.2 N-01 ~ N-11 + §2 核心设计原则 + §3 不可妥协约束 + §4 开发流程自检。
+- 任何 spec / plan / tasks / 代码 / 文档提交前**必须**对照 §1.2 N-01 ~ N-12 + §2 核心设计原则 + §3 不可妥协约束 + §4 开发流程自检；Phase / 段位 / 子段 / Error class 4 术语严格按 §4.3 + README §1.5 分层使用。
 
 ### 6.2 修订流程
 
@@ -346,15 +383,12 @@
 
 ## 第 7 章 指南文档
 
-- 运行时开发指引：`harness/features/立项书.md`（v1.0 全文；本宪法的唯一源文档）；
+- 运行时开发指引：`harness/features/立项书.md`（本宪法的唯一源文档）；
+- Phase 进度与映射总表：`harness/features/README.md`（§3 一览总表 / §4-§9 详细设计 / §11 段位速查表 / §12 提示词文件落地约定，**含 §1.5 4 术语表**——Phase / 段位 / 子段 / Error class 严格分层在此表定义）；
 - Speckit 工作流：`harness/prompt/speckit.md`；
 - 中间件速查：`harness/report/LangChain内置中间件速查表.md`；
 - Skills 自研依据：`harness/report/关于subagent的实现方式.md`、`harness/report/内置工具应该自己实现还是调用中间件.md`；
-- 长期记忆依据：`harness/report/Saver和Store.md`；
+- 长期记忆依据（含 `sessions_metadata` 表设计蓝本）：`harness/report/Saver和Store.md`；
 - 选型依据：`harness/report/LangChain与DeepAgents的选择.md`；
 - 节点 / 中间件关系依据：`harness/report/LangGraph的节点到底是什么东西.md`；
 - 开源合规：`harness/report/全开源最佳实践.md`。
-
----
-
-**Version**: v0.1 | **Ratified**: 2026-10-14 | **Last Amended**: 2026-10-14
