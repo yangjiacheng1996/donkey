@@ -22,7 +22,7 @@
 | **预留 exit code** | 5–10（留给 v1.x 试运行期新错误） |
 | **本 Phase 不占用的 exit code** | 3（`TemplateGenerationError`，推迟到 F001-P2）、4（`BuiltinToolGenerationError`，推迟到 F001-P3） |
 | **对应验收脚本** | `tests/e2e/phase/verify_phase_f001_p1.py` |
-| **闭环复杂度（断言数）** | 低（6 断言） |
+| **闭环复杂度（断言数）** | 低（7 断言） |
 | **准入条件** | 无前置（仓库初始化即可启动） |
 
 ---
@@ -95,14 +95,16 @@ donkey/
 
 > **注意**：本 Phase **不**创建 `donkey/tests/` 之外的任何文件骨架；`donkey/core/api.py` / `donkey/core/workspace/init.py` / `donkey/cli/cli_client.py` / `pyproject.toml` 等由本 Phase 的 spec.md 落地时按 §4 实现要点创建。`donkey/web/`、`donkey/gui/` 目录由后续 F005 / F006 实施，本 Phase 仅维持占位空目录状态。
 
-### 3.2 提前就绪的模块资产（Phase 启动时已存在）
+### 3.2 本 Phase 自建的模块资产（由本 Phase 的任务创建并建档）
 
 | 资产 | 路径 | 内容约束 |
 |---|---|---|
 | **exit code 段位常量** | `donkey/core/exit_codes.py` | 已定义 F001 段位常量（如 `EXIT_CODE_SEGMENT_INIT = (1, 10)`）；F002 / F003 / F004 / F005 / F006 段位常量也在此文件预留定义，但**不**在本 Phase 使用。 |
 | **异常类层次** | `donkey/core/exceptions.py` | 已定义以下继承链：<br>• `DonkeyError(Exception)` —— donkey 总基类<br>• `WorkspaceInitError(DonkeyError)` —— F001 基类<br>• `PathNotFoundError(WorkspaceInitError)` —— 对应 exit code 1<br>• `PathPermissionError(WorkspaceInitError)` —— 对应 exit code 2<br>每个异常类有 docstring 标注 `exit code: N`（便于后续 CLI 退出码映射）。 |
 | **模板清单 manifest schema 文件** | `donkey/core/workspace/templates/manifest.json` | 已定义的 JSON schema，列出 donkey init 阶段自动生成的所有文件路径。**schema 字段说明**：<br>• `version: int` —— manifest schema 版本（v1 填 `1`）<br>• `entries: list[dict]` —— 模板文件清单，每个 entry 含 `path: str`（相对 workspace 根的路径）与可选 `format: str`（`markdown` / `toml` / `json` / `text` / `python` / `directory` / `sqlite3` 共 7 种——用于 P2 渲染器分派；**本 Phase 不加载、不解析**（加载推迟到 F001-P2））<br>**P1 阶段的初始 manifest 内容**：**仅 3 条**——`instruction.md`（markdown）/ `providers/default.toml`（toml）/ `mcp/mcp.json`（json），与 P1 已就位的 3 个 .txt 占位一一对应。<br>**⚠️ 清单必须分阶段追加**（P1 3 条 → P2 +43 条 = 46 条 → P3 +7 条 = 53 条；P2 的 +43 含 `providers/README.md` + 26 个 provider stub）：**清单里的每一条都必须已有对应的模板源 .txt**，否则 P2 的 `render_templates` 会因源缺失抛 `TemplateGenerationError` (exit 3)。 |
-| **模板源文件占位** | `donkey/core/workspace/templates/*.txt` | 已就位的占位文件，**至少**包含 3 个：<br>• `instruction.md.txt`（空文件或仅含 1 行注释即可）<br>• `providers/default.toml.txt`（**保留名**，装 `default_provider` + `default_model`）<br>• `mcp.json.txt`<br>本 Phase **不**解析这些 .txt 内容、**不**加载清单、**不**验证 .txt 是否存在——P2 才负责加载 + 渲染 + 校验（P2 的清单加载失败归 `TemplateGenerationError` exit 3）。<br>**源文件路径命名规则**：`donkey/core/workspace/templates/{entry['path']}.txt`（与 manifest entry 的 `path` 一一对应，如 `templates/tools/filesystem.py.txt`）。 |
+| **模板源文件占位** | `donkey/core/workspace/templates/*.txt` | 已就位的占位文件，**至少**包含 3 个：<br>• `instruction.md.txt`（空文件或仅含 1 行注释即可）<br>• `providers/default.toml.txt`（**保留名**，装 `default_provider` + `default_model`）<br>• `mcp/mcp.json.txt`（源文件路径 MUST 由清单条目 `path` 派生 = `mcp/mcp.json` + `.txt`，MUST NOT 写作 `mcp.json.txt`，否则 P2 渲染时源缺失 → exit 3）<br>本 Phase **不**解析这些 .txt 内容、**不**加载清单、**不**验证 .txt 是否存在——P2 才负责加载 + 渲染 + 校验（P2 的清单加载失败归 `TemplateGenerationError` exit 3）。<br>**源文件路径命名规则**：`donkey/core/workspace/templates/{entry['path']}.txt`（与 manifest entry 的 `path` 一一对应，如 `templates/tools/filesystem.py.txt`）。 |
+
+> **注意**：这 4 类资产在本 Phase 启动时**并不存在**（仓库中 `donkey/core/` 等目录为空占位）——它们由本 Phase 的 Foundational 阶段任务创建并建档。本 Phase 对它们**只建档，不加载、不解析、不校验、不消费**。
 
 ### 3.3 技术栈就绪
 
@@ -128,7 +130,7 @@ from pathlib import Path
 class InitResult:
     """donkey init 成功完成的返回结果。"""
     workspace_path: Path           # workspace 绝对路径
-    name: str                      # workspace 名称（来自 --name 或 path.basename()）
+    name: str                      # workspace 名称（`name` 为 `None` / 空串时 = 路径末段派生值；库 API 显式传入非空 `name` 时以其为准；v1 的 CLI 通道恒由路径派生）
     force: bool                    # 是否传了 --force
     templates_loaded: int          # 模板清单条目数（**P1 固定 0**——本 Phase 不加载清单；P2 起才填真实条目数）
     files_created: int             # 本次实际新建的文件数（本 Phase 固定 0——仅建根目录）
@@ -141,7 +143,7 @@ def init_workspace(path: str | Path,
 
     库 API 契约（v1）：
     - path：workspace 绝对路径或相对路径（函数内部 resolve 为绝对路径）
-    - name：可选 workspace 名称；为 None 时取 path.basename()
+    - name：可选 workspace 名称；为 None / 空串时取解析后路径的末段名（= basename）；为非空串时以该值为准（CLI 入口不暴露此参数）
     - force：是否强制重置已存在模板文件（P2 才会真正使用；P1 仅记录）
     - 返回 InitResult dataclass，描述本次 init 的产出
     - 失败时 raise WorkspaceInitError 子类，由 CLI 层捕获并打印 exit code
@@ -149,7 +151,7 @@ def init_workspace(path: str | Path,
     P1 行为（= 本 Phase 的实现范围）：
     1. validate_init_request(path, name, force) → (abs_path, resolved_name, force)
        （内部完成 check_path / check_permission）
-    2. 创建 workspace 根目录（parents=True, exist_ok=True）
+    2. 创建 workspace 根目录（exist_ok=True，MUST NOT 补建缺失的父目录——父目录缺失已在 check_path 阶段按 spec FR-009 判为路径类错误并拒绝）
        —— 已存在不是错误（幂等设计）
     3. 返回 InitResult(files_created=0, files_skipped=0)
        （模板内容由 F001-P2 的 render_templates 写入）
@@ -157,7 +159,7 @@ def init_workspace(path: str | Path,
     abs_path, resolved_name, force = validate_init_request(
         path=path, name=name, force=force,
     )
-    abs_path.mkdir(parents=True, exist_ok=True)
+    abs_path.mkdir(exist_ok=True)
     return InitResult(
         workspace_path=abs_path,
         name=resolved_name,
@@ -197,6 +199,10 @@ def check_path(path: str | Path) -> Path:
        - path.parent 不存在 → raise PathNotFoundError
        - path 是相对路径但 cwd 解析后 parent 仍不存在 → raise PathNotFoundError
        - path 包含非法字符（如 NUL \\0）→ raise PathNotFoundError（合并到 path 错误）
+    2b. 验证解析后末段名非空（名称恒取 basename）
+       - 末段名为空（文件系统根 `/`、盘符根 `D:\\`、UNC 共享根）→ raise PathNotFoundError
+       - 根目录的 parent 就是它自己且"存在"，故本条 MUST 由"末段名为空"驱动
+       - 名称抽取 MUST 用 Path.name 属性，MUST NOT 手写字符串切分（后者把 `D:\\` 误判为 `D:`）
     3. 不检查 path 是否已存在（幂等设计：已存在不是错误）
     4. 不检查权限（由 check_permission 单独负责）
 
@@ -225,7 +231,7 @@ def validate_init_request(path: str | Path,
     行为：
     1. 调 check_path → 拿到绝对路径 abs_path
     2. 调 check_permission(abs_path) → 校验权限
-    3. 决定最终 name：name is None → abs_path.name（= basename）
+    3. 决定最终 name：`name` 为 `None` 或空串 → `abs_path.name`（= basename）；为非空串 → 采用该值（CLI 入口 MUST NOT 提供任何命名输入通道）
     4. 不检查 "workspace 已存在"——幂等设计，已存在不是错误
 
     返回：(abs_path, name, force) 三元组
@@ -292,11 +298,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="workspace 目录路径（绝对或相对均可）",
     )
     init_parser.add_argument(
-        "--name",
-        default=None,
-        help="workspace 名称（缺省取 path.basename()）",
-    )
-    init_parser.add_argument(
         "--force",
         action="store_true",
         help="强制重置已存在的模板文件（重置逻辑由 F001-P2 阶段的 render_templates 实现）",
@@ -343,7 +344,7 @@ if __name__ == "__main__":
 **spec 要求**：
 
 - argparse 用法严格按上例（`add_subparsers(required=True)` 强制必须传子命令）；
-- `init` 子命令的 3 个参数（`path` 必填位置参数 / `--name` 可选 / `--force` flag）顺序与名字不能改；
+- `init` 子命令的 2 个参数（`path` 必填位置参数 / `--force` flag）顺序与名字不能改；**v1 不提供 `--name`**——workspace 名称恒取 `path.basename()`（避免"路径说一套、名字说另一套"的身份混淆）；
 - 异常处理统一捕获 `WorkspaceInitError`（F001 基类）；未注册的子类兜底归到 exit 1（**禁止**直接 `except Exception` 吞所有错误）；
 - 错误消息必须打到 `stderr`；
 - 本文件仅允许 `pathlib` 作为 IO 库；**禁止** import `langchain` / `langgraph` / `sqlite3`（N-04）。
@@ -421,6 +422,12 @@ def test_scenario_2_path_not_found(tmp_path):
     )
     assert result.returncode == 1
     assert "PathNotFoundError" in result.stderr or "父目录不存在" in result.stderr
+    # 文件系统根本身不是合法 workspace 根（末段名为空）→ 同样 exit 1
+    root = subprocess.run(
+        ["donkey", "init", "/"],
+        capture_output=True, text=True,
+    )
+    assert root.returncode == 1
 ```
 
 ### 6.3 场景 3：PATH 权限不足 → exit 2
@@ -490,9 +497,32 @@ def test_scenario_6_p1_no_template_rendering(tmp_path):
     # 不强制要求含 instruction.md / providers/default.toml 等
 ```
 
+### 6.7 场景 7：名称派生 + 结果摘要回显（v1 无 --name）
+
+```python
+def test_scenario_7_name_derived_from_path(tmp_path):
+    """场景 7：workspace 名称恒取 path.basename()，无独立命名参数"""
+    ws = tmp_path / "my-agent"
+    result = subprocess.run(
+        ["donkey", "init", str(ws)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    # 名称恒为路径末段（v1 不提供 --name —— 避免"路径说一套、名字说另一套"）
+    assert "my-agent" in result.stdout
+    # 摘要回显绝对路径与名称
+    assert str(ws) in result.stdout
+    # 用户误传命名类参数 → 归入退出码 1（用法错误）
+    bad = subprocess.run(
+        ["donkey", "init", str(ws), "--name", "alice"],
+        capture_output=True, text=True,
+    )
+    assert bad.returncode == 1
+```
+
 ### 6.8 退出条件总览
 
-verify_phase_f001_p1.py 的 6 个 `test_*` 函数全部 PASS → F001-P1 完成。
+verify_phase_f001_p1.py 的 7 个 `test_*` 函数全部 PASS → F001-P1 完成。
 
 ---
 
@@ -542,7 +572,7 @@ verify_phase_f001_p1.py 的 6 个 `test_*` 函数全部 PASS → F001-P1 完成�
 | 模板骨架文件实际写入（`instruction.md` / `providers/default.toml` / `providers/<id>.toml` × 26 / `mcp/mcp.json` 等） | F001-P2 |
 | `render_templates(path, name, force)` 函数实现 | F001-P2 |
 | workspace manifest（`donkey/manifest.json`）的写入与解析 | F001-P2 |
-| `--name` 注入到 `providers/default.toml` 注释 / `README.md` 标题 | F001-P2 |
+| 名称（取自 `path.basename()`）注入到 `providers/default.toml` 注释 / `README.md` 标题 | F001-P2 |
 | 3 个内置 `@tool` 文件（`tools/filesystem.py` / `tools/commandline.py` / `tools/webfetch.py`）生成 | F001-P3 |
 | Skills example 三层示例（`skills/example/SKILL.md` Level 1/2/3） | F001-P3 |
 | `tools/__init__.py` / `tools/README.md` 等支撑文件 | F001-P3 |
@@ -605,7 +635,7 @@ verify_phase_f001_p1.py 的 6 个 `test_*` 函数全部 PASS → F001-P1 完成�
 3. **Edge Cases**：列出本 Phase 的边界条件（路径含 NUL、相对路径解析、权限缺失、已存在 workspace 的 4 种场景）——**不含模板清单损坏**（P1 不加载清单，该场景属 P2 / exit 3）；
 4. **Success Criteria (SC-001 ~ SC-NNN)**：可量化的退出条件（"7 个 verify 断言全部 PASS"、"ruff + mypy 零 error"等）；
 5. **Key Entities**：`InitResult` dataclass 字段定义；`DonkeyError` / `WorkspaceInitError` / `PathNotFoundError` / `PathPermissionError` 异常类继承链；
-6. **Assumptions**：仓库已初始化、`donkey/core/` 等目录已存在；manifest.json / .txt 模板源已就位（这些是**P2** 的入口条件，P1 不加载、不校验、不实现）。
+6. **Assumptions**：仓库已初始化、`donkey/core/` 等目录已存在；manifest.json / .txt 模板源**由本 Phase 创建并建档**（作为 **P2** 的入口条件；P1 不加载、不校验、不实现）。
 
 **Spec 禁止**包含的内容（留给 `/speckit.plan` 处理）：
 

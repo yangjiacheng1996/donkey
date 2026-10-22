@@ -96,21 +96,21 @@ workspace 内的所有相对路径引用**以 workspace 绝对路径为唯一根
 
 ### 3.2 本 Phase 不重复实现的接口契约（来自 F001-P1，本 Phase 直接复用）
 
-下列 4 个函数已在 `donkey/core/workspace/init.py` 内由 F001-P1 实现并通过单测；F001-P2 **不**修改它们，**只**追加 `render_templates` / `init_workspace_inner` 等新函数。F001-P2 调用契约如下：
+下列 **3 个**函数已在 `donkey/core/workspace/init.py` 内由 F001-P1 实现并通过单测；F001-P2 **不**修改它们，**只**追加 `render_templates` / `init_workspace_inner` / `load_template_manifest` 等新函数。F001-P2 调用契约如下：
 
 | 函数 | F001-P2 调用方式 | 返回值 / 行为 |
 |---|---|---|
 | `check_path(path: str \| Path) -> Path` | `validate_init_request` 内部已调；F001-P2 间接通过 `validate_init_request` 调用 | 父目录不存在 / 路径解析失败 → raise `PathNotFoundError`（exit 1）；否则返回绝对路径 `Path` |
 | `check_permission(path: Path) -> None` | 同上（间接通过 `validate_init_request` 调用） | 权限不足 → raise `PathPermissionError`（exit 2）；否则 `None` |
-| `load_template_manifest(manifest_path: Optional[Path] = None) -> list[dict]` | `validate_init_request` 末尾调用；F001-P2 在 `init_workspace_inner` 内**再次调用**用于驱动渲染 | 返回 manifest 条目 `list[dict]`；损坏 / 缺失 → raise `PathNotFoundError`（exit 1，归类奥卡姆合并） |
 | `validate_init_request(path, name, force) -> tuple[Path, str, bool]` | F001-P2 `init_workspace_inner` 入口首行调用 | 返回 `(abs_path, resolved_name, force)` 三元组；任一前置校验失败抛 `WorkspaceInitError` 子类 |
+| `load_template_manifest(manifest_path: Path \| None = None) -> list[dict]` | **F001-P2 拥有**（F001-P1 只**建档**清单、**不加载不解析**，spec FR-029 / T042）；由 F001-P2 在 `init_workspace_inner` 内调用以驱动渲染 | 返回 manifest 条目 `list[dict]`；损坏 / 缺失 / schema 非法 → raise `TemplateGenerationError`（exit 3，**不是** `PathNotFoundError`——用户修复动作是"重装 donkey"，与 exit 1 的"建目录 / 换路径"不同，按奥卡姆不能合并；口径见 §4.1 `load_template_manifest` 行为第 2 条与 §4.9 单测） |
 
 ### 3.3 提前就绪的模块资产（Phase 启动时已存在）
 
 | 资产 | 路径 | 内容约束 |
 |---|---|---|
-| **核心库 API** | `donkey/core/api.py` | `init_workspace(path, name=None, force=False) -> InitResult` 函数签名已定义；**P1 实现 = 校验 + 创建 workspace 根目录 + 加载模板清单**（不渲染模板）；`InitResult` dataclass 字段顺序与类型已锁定：`workspace_path: Path` / `name: str` / `force: bool` / `templates_loaded: int` / `files_created: int` / `files_skipped: int`。本 Phase 把函数体替换为「调 `init_workspace_inner` 完成模板渲染」。 |
-| **核心逻辑骨架** | `donkey/core/workspace/init.py` | 上表 4 个函数已由 F001-P1 实现并测试通过；本 Phase **复用** `validate_init_request` 的 PATH + 权限校验结果，并在其后**追加**渲染逻辑（不修改 F001-P1 已实现的 4 个函数）。 |
+| **核心库 API** | `donkey/core/api.py` | `init_workspace(path, name=None, force=False) -> InitResult` 函数签名已定义；**P1 实现 = 校验 + 创建 workspace 根目录**（P1 **不加载、不解析模板清单**——清单只建档，属 spec FR-029；三个计数恒 `0`）；`InitResult` dataclass 字段顺序与类型已锁定：`workspace_path: Path` / `name: str` / `force: bool` / `templates_loaded: int` / `files_created: int` / `files_skipped: int`。本 Phase 把函数体替换为「调 `init_workspace_inner` 完成模板渲染」。 |
+| **核心逻辑骨架** | `donkey/core/workspace/init.py` | 上表 **3 个**函数（`check_path` / `check_permission` / `validate_init_request`）已由 F001-P1 实现并测试通过（`load_template_manifest` 由**本 Phase 新增**，非 P1 资产）；本 Phase **复用** `validate_init_request` 的 PATH + 权限校验结果，并在其后**追加**渲染逻辑（不修改 F001-P1 已实现的 3 个函数）。 |
 | **CLI 入口** | `donkey/cli/cli_client.py` | argparse + 异常处理已就位。本 Phase **不**修改 CLI 代码；`init_workspace` 函数体补齐后 CLI 自动可调用，仅需在本文件 `_EXCEPTION_TO_EXIT_CODE` 字典**追加** 1 行（见 §4.4）。 |
 | **exit code 常量** | `donkey/core/exit_codes.py` | 已定义 `EXIT_CODE_OK` / `EXIT_CODE_PATH_NOT_FOUND` / `EXIT_CODE_PATH_PERMISSION`（F001-P1 用）。本 Phase 在此文件**追加**定义 `EXIT_CODE_TEMPLATE_GENERATION = 3`。 |
 | **异常类层次** | `donkey/core/exceptions.py` | 已定义 `DonkeyError` / `WorkspaceInitError` / `PathNotFoundError` / `PathPermissionError`（F001-P1 用）。本 Phase 在此文件**追加**定义 `TemplateGenerationError(WorkspaceInitError)` —— 对应 exit code 3。 |
@@ -181,6 +181,7 @@ def render_templates(workspace_path: Path,
           raise TemplateGenerationError（合并项：源缺失 + 渲染失败 + 文件写入失败 + **sqlite3 schema 构造失败**）
     2. 处理 manifest 中标记为目录的 entry（如 `skills/example/`）：
        - 不传 force：目录不存在则 mkdir(parents=True, exist_ok=True)
+         （**仅限 workspace 根之下的目录条目**——根目录自身的创建见 §4.3 `init_workspace_inner` 口径：`abs_path.mkdir(exist_ok=True)`，MUST NOT 补建缺失的父目录，spec FR-009）
        - 传 force：目录不存在则创建；存在则**递归清空其内 manifest 列出的文件**（不删目录本身）
     3. **绝不触碰**任何不在 manifest 内的路径（用户的 `media/` / 自定义 `tools/my_tool.py` 等）——
        **注意**：sqlite3 模板（`memory/sessions.sqlite3` 等三个）**已经纳入 manifest**，所以会被 `--force` 重置；
@@ -198,7 +199,7 @@ def init_workspace_inner(path: str | Path,
     行为：
     1. 调 validate_init_request(path, name, force) → (abs_path, resolved_name, force)
     2. 调 load_template_manifest() → manifest_entries（清单损坏 → TemplateGenerationError）
-    3. abs_path.mkdir(parents=True, exist_ok=True)   # 建根目录（P1 语义保留）
+    3. abs_path.mkdir(exist_ok=True)   # 建根目录（P1 语义：MUST NOT 补建缺失的父目录——父目录缺失已在 check_path 阶段按 spec FR-009 判为路径类错误并拒绝）
     4. 调 render_templates(abs_path, resolved_name, force, manifest_entries) → (created, skipped)
     5. 调 write_workspace_manifest(abs_path, resolved_name, force) → 写 workspace manifest
     6. 返回 (abs_path, resolved_name, force, created, skipped, len(manifest_entries))
@@ -296,7 +297,7 @@ def init_workspace(path: str | Path,
 - 函数体**只**调用 `init_workspace_inner`，**不**在此处写业务逻辑（保持 api.py 极薄）；
 - 返回 `InitResult` 字段顺序与类型严格按 P1 锁定值（P2 不能改 dataclass schema）；`templates_loaded` = 本次渲染的 manifest 条目数（P1 锁定语义，本 Phase 补齐实现）；
 - `init_workspace_inner` 的 import 在 `api.py` 顶部（`from donkey.core.workspace.init import init_workspace_inner`）；
-- `init_workspace_inner` 内部**先 `abs_path.mkdir(parents=True, exist_ok=True)`** 再渲染（保持 P1 的"建根目录"语义，避免只写子文件时的目录缺失）。
+- `init_workspace_inner` 内部**先 `abs_path.mkdir(exist_ok=True)`** 再渲染（保持 P1 的"建根目录"语义，避免只写子文件时的目录缺失）；**MUST NOT** 使用 `parents=True`——spec FR-009 明令 MUST NOT 自动创建缺失的父目录（父目录缺失已在 `check_path` 阶段判为路径类错误并拒绝）；**仅** workspace 根**之下**的目录条目（如 `skills/example/`）才用 `mkdir(parents=True, exist_ok=True)`（见 §4.1 第 2 步）。
 
 ### 4.4 `donkey/cli/cli_client.py` —— 异常映射表追加 1 项
 
@@ -357,7 +358,7 @@ P1 阶段 manifest（3 条）+ .txt 占位已就位；P2 阶段 spec **必须**�
 <!-- 禁止行为、安全边界 -->
 ```
 
-> **`{{ workspace_name }}` 占位符**：由 `render_templates` 在渲染时替换为 `--name`（缺省取 `path.basename()`）。F001-P2 §6.5 的"--name 注入"断言依赖此占位符。
+> **`{{ workspace_name }}` 占位符**：由 `render_templates` 在渲染时替换为 **workspace 名称 = 路径末段 `path.basename()`**（v1 不提供 `--name` 入口，名称恒由路径派生）。F001-P2 §6.5 的"名称注入"断言依赖此占位符。
 
 #### 4.7.2 `providers/` 模板（`default.toml` + `README.md` + 26 个 provider stub）
 
@@ -736,13 +737,13 @@ def test_scenario_4_skill_frontmatter_valid(tmp_path):
     assert "description:" in text
 ```
 
-### 6.5 `--name=foo` 注入
+### 6.5 名称注入（名称 = 路径末段）
 
 ```python
 def test_scenario_5_name_injection(tmp_path):
-    """--name=foo 注入后，README 标题与 providers/default.toml 注释含 'foo'"""
-    ws = tmp_path / "ws"
-    subprocess.run(["donkey", "init", str(ws), "--name", "foo"], check=True, capture_output=True)
+    """workspace 名称取路径末段后，README 标题与 providers/default.toml 注释含该名称"""
+    ws = tmp_path / "foo"
+    subprocess.run(["donkey", "init", str(ws)], check=True, capture_output=True)
     readme = (ws / "README.md").read_text(encoding="utf-8")
     assert "foo" in readme
     provider = (ws / "providers" / "default.toml").read_text(encoding="utf-8")
@@ -975,8 +976,8 @@ verify_phase_f001_p2.py 的 14 个 `test_*` 函数全部 PASS → F001-P2 完成
 
 2. **本 Phase 套件**：
    ```bash
-   pytest tests/unit/test_template_skeleton.py -v    # 至少 12 个
-   pytest tests/e2e/phase/verify_phase_f001_p2.py -v  # 15 个
+   pytest tests/unit/test_template_skeleton.py -v    # 至少 14 个（见 §4.9）
+   pytest tests/e2e/phase/verify_phase_f001_p2.py -v  # 14 个
    ```
 
 3. **静态检查**：
@@ -1064,9 +1065,9 @@ verify_phase_f001_p2.py 的 14 个 `test_*` 函数全部 PASS → F001-P2 完成
 执行 `/speckit.specify` 后生成的 `specs/001-donkey-init-workspace/phase-2-template-skeleton/spec.md` **必须**包含：
 
 1. **User Stories**：按优先级 P1 → P14 列出 14 个核心场景（对应 §6 的 14 个 verify 断言）；
-2. **Functional Requirements (FR-001 ~ FR-NNN)**：覆盖 §4 的 10 个子节（4.1 ~ 4.10）；FR 中如需引用 F001-P1 已实现的函数（`check_path` / `check_permission` / `load_template_manifest` / `validate_init_request`），仅引用**函数签名与行为契约**，不复述其实现细节（详见 §3.2 函数契约小节）；
+2. **Functional Requirements (FR-001 ~ FR-NNN)**：覆盖 §4 的 10 个子节（4.1 ~ 4.10）；FR 中如需引用 F001-P1 已实现的函数（`check_path` / `check_permission` / `validate_init_request`——共 3 个；`load_template_manifest` 属 F001-P2 自身实现，不在 P1 资产之列），仅引用**函数签名与行为契约**，不复述其实现细节（详见 §3.2 函数契约小节）；
 3. **Edge Cases**：本 Phase 边界条件（用户编辑过模板 / 用户删除模板 / 用户删除源 .txt / 用户手动 rm -rf / sqlite3 文件被 touch 等）；
-4. **Success Criteria (SC-001 ~ SC-NNN)**：可量化的退出条件（"14 个 verify 断言全部 PASS"、"F001-P1 6 个断言仍全绿"、"ruff + mypy 零 error"等）；
+4. **Success Criteria (SC-001 ~ SC-NNN)**：可量化的退出条件（"14 个 verify 断言全部 PASS"、"F001-P1 7 个断言仍全绿"、"ruff + mypy 零 error"等）；
 5. **Key Entities**：`TemplateGenerationError` 异常类、`workspace manifest` 字典结构、模板清单 `manifest.json` schema；
 6. **Assumptions**：F001-P1 (`cli_validation`) 已完成；`donkey/core/workspace/templates/*.txt` 已就位（占位 / 实际内容均可）；F002 / F003 / F004 域不存在。
 

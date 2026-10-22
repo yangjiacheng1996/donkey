@@ -389,6 +389,16 @@ AC-1 ~ AC-5 全部通过；三套官方模板 workspace（通用型 / 编程型 
 2. 在 PR 描述中显式声明例外范围与过期时间；
 3. 在过期前完成合规修复或正式纳入宪法。
 
+> **例外 E-01（2026-10-21，Maintainer 批准）**：F001-P1 **不**交付 `.github/workflows/ci.yml`。
+> - **范围**：仅 F001-P1（`cli_validation` Phase）；`donkey init` 的 CI 工作流文件推迟到仓库级 CI 落地时创建。
+> - **理由**：CI 工作流文件属**仓库级资产**（宪法 §4.1 的项目级方法论），非单 Phase 交付物；
+>   且 F001-P1 落地时仓库仅有 1 个 Phase 的测试面，首次落地 CI 的时序风险高于收益。
+>   替代保障：plan G5 记录 CI 最小内容骨架（`pytest tests/` + `pytest tests/unit/ --cov=donkey.core --cov-fail-under=80`
+>   + `ruff check donkey/ tests/` + `mypy donkey/ tests/`），本 Phase 的完成证据以本地命令清单为准。
+> - **过期时间**：F001-P3（`builtin_tools`）结束前 —— 最迟在该 Phase 内交付 `.github/workflows/ci.yml`，
+>   或由 Maintainer 显式决定转为正式纳入宪法。
+> - **登记位置**：plan G5（判定保持「⚠️ 部分」，依据列补注本例外）；`research.md` R-08（结论不变，仅记录例外已登记）。
+
 ---
 
 ## 第 7 章 指南文档

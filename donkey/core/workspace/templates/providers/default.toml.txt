@@ -1,0 +1,5 @@
+# providers/default.toml —— 默认 provider 配置的源文件占位
+# （F001-P1 只建档、不加载、不渲染）
+
+default_provider = "{{default_provider}}"
+default_model = "{{default_model}}"

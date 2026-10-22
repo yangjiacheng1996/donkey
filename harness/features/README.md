@@ -415,7 +415,7 @@ templates/
 >
 > | 阶段 | 追加条数 | 累计 | 内容 |
 > |---|---|---|---|
-> | **F001-P1** | 3 | 3 | `instruction.md` / `providers/default.toml` / `mcp/mcp.json`（与 P1 已就位的 3 个 .txt 占位一一对应；P1 只加载清单、不渲染） |
+> | **F001-P1** | 3 | 3 | `instruction.md` / `providers/default.toml` / `mcp/mcp.json`（与 P1 已就位的 3 个 .txt 占位一一对应；**P1 只建档清单（3 条），不加载、不解析、不渲染**） |
 > | **F001-P2** | +43 | 46 | 其余 7 个文本模板 + 6 个目录条目（`tools/` `mcp/` `skills/` `skills/example/` `memory/` **`providers/`**）+ 3 个 sqlite3 模板 + **`providers/README.md` + 26 个 provider stub（`providers/<id>.toml`）** |
 > | **F001-P3** | +7 | 53 | `tools/__init__.py` + 3 个内置 tool + 3 个 Skills Level 3 示例 |
 >
@@ -467,7 +467,9 @@ templates/
 
 ### §4.3 F001-P1 = `cli_validation`（exit 1-2）
 
-**入口条件（Entry Gate）**：
+**入口条件（Entry Gate）**：无前置（仓库初始化即可启动；见 §12.2「准入条件」列）。
+
+**本 Phase 交付物（由本 Phase 自建，不属入口条件）**：
 - `donkey/core/` / `donkey/cli/` / `donkey/web/` / `donkey/gui/` 目录已创建；
 - `donkey/core/exit_codes.py` 已实现 exit code 段位常量；
 - `donkey/core/exceptions.py` 已定义基类 `DonkeyError` 与 F001 基类 `WorkspaceInitError`，并定义 2 个具体异常类（`PathNotFoundError` / `PathPermissionError`，对应 exit 1 / 2）；
@@ -479,13 +481,13 @@ templates/
 - `core/workspace/init.py`：核心逻辑骨架：
   - `check_path(path) -> Path` — 解析为绝对路径，验证父目录存在；失败抛 `PathNotFoundError`；
   - `check_permission(path) -> None` — 验证当前用户对 path 有写权限；失败抛 `PathPermissionError`；
-  - `load_template_manifest() -> list[dict]` — 加载 `core/workspace/templates/manifest.json`，返回模板条目列表（每条含 `path` + 可选 `format`）；
   - `validate_init_request(path, name, force)` — 综合校验。
+  - **本 Phase 不实现 `load_template_manifest`**——模板清单加载推迟到 F001-P2（其失败归 `TemplateGenerationError` exit 3），口径与 `harness/features/feature001_phase001_cli_validation.md` L181 / L244 一致。
   - **不**再检查 "workspace 已存在"——幂等设计下已存在不是错误（详见 §4.1.1）。
 - `cli/cli_client.py`：argparse 入口，仅 `init` 子命令：
   - 位置参数 `<PATH>` 必填；
-  - `--name` 可选，默认取 `path.basename()`；
-  - `--force` flag。
+  - `--force` flag；
+  - **v1 不提供 `--name`**——workspace 名称恒取 `path.basename()`（避免"路径说一套、名字说另一套"的身份混淆）。
 - `cli` **不**直接 import `pathlib` 之外的 IO 库；所有 IO 通过 `core.api` 调用（**宪法 N-04 / N-05**）。
 
 **异常退出码**（详见 §3.1 表）：
@@ -495,17 +497,19 @@ templates/
 **退出条件（Exit Gate）**：
 - `verify_phase_f001_p1.py` 通过以下断言：
   1. `donkey init /tmp/empty-ws` → exit 0（场景 1：全新创建）；
-  2. `donkey init /nonexistent/parent/ws` → exit 1；
-  3. `donkey init /root/forbidden`（无权限场景，假设 root-only 目录）→ exit 2；
-  4. `donkey init /tmp/ws`（已存在 workspace，无 `--force`）→ exit 0（场景 2：幂等补齐，不报错）；
-  5. `donkey init /tmp/ws --force`（已存在 workspace，传 `--force`）→ exit 0（场景 3：模板重置）；
-  6. **不**检查模板渲染 / 目录内容（属于 P2）；允许 init 出来的目录"仅含占位空文件"或"创建空目录"。
+  2. `donkey init /nonexistent/parent/ws` → exit 1（场景 2）；
+  3. `donkey init <只读父目录>/ws`（`chmod 0o555` 模拟无写位，**root 下同样被拒**，见 `research.md` R-04）→ exit 2（场景 3）；
+  4. `donkey init /tmp/ws`（已存在 workspace，无 `--force`）→ exit 0（场景 4：幂等，不报错）；
+  5. `donkey init /tmp/ws --force`（已存在 workspace，传 `--force`）→ exit 0（场景 5：强制标志；**P1 仅记录不重置**，重置属 F001-P2）；
+  6. **不**检查模板渲染 / 目录内容（属于 P2）；P1 只创建**空目录**（三个计数恒 0，不生成任何文件）（场景 6）；
+  7. 名称派生：workspace 名称 = 路径末段（v1 **无** `--name`），结果摘要回显绝对路径与名称；误传命名类参数 → exit 1（场景 7）。
 
 **绝对不做**：
 - 不生成 `tools/` / `skills/` 等子目录内容（推迟到 P2 / P3）；
 - **不**做"workspace 已存在则报错"的判断（幂等设计，已存在不是错误）；
 - 不挂载任何中间件（属于 F004 run 域）；
-- 不解析 `providers/` 下的任何 TOML（属于 F002 load 域）。
+- 不解析 `providers/` 下的任何 TOML（属于 F002 load 域）；
+- **不**交付 `.github/workflows/ci.yml`（C1 工作流文件 Deferred——属仓库级资产，非单 Phase 交付物；已按宪法 §6.3 登记临时例外 E-01，替代保障为 plan G5 记录的 CI 最小内容骨架 + 本地命令清单作为完成证据，最迟于 F001-P3 结束前交付）。
 
 ---
 
@@ -544,7 +548,7 @@ templates/
   - **不传 `force`**：若 manifest 已存在则跳过（保留原 `created_at`）；
   - **传 `force`**：刷新 `created_at` 为当前时间；
   - 字段 `donkey_version` 记录生成本次 manifest 的 donkey 版本号（用于未来迁移提示）。
-- `--name` 参数注入：`name` 注入到 `providers/default.toml` 注释、`README.md` 标题、manifest。
+- 名称注入：workspace 名称（= 路径末段 `path.basename()`）注入到 `providers/default.toml` 注释、`README.md` 标题、manifest。
 
 **异常退出码**（详见 §3.1 表）：
 - exit 3 = `TemplateGenerationError` —— 模板骨架生成失败（合并四项：源缺失 + 渲染失败 + 文件写入失败 + sqlite3 schema 构造失败；用户修复动作相同：重装 donkey / 检查权限 / 重试 init）。
@@ -555,7 +559,7 @@ templates/
   2. 生成的 `providers/default.toml` + 26 个 provider stub 用 `tomllib` 解析无异常；
   3. 生成的 `mcp/mcp.json` 用 `json.loads` 解析无异常；
   4. 生成的 `skills/example/SKILL.md` frontmatter 用 `python-frontmatter` 解析，含 `name` + `description`；
-  5. `--name=foo` 注入后，README 标题与 `providers/default.toml` 注释含 "foo"；
+  5. 名称注入：workspace 路径末段为 `foo` 时，README 标题与 `providers/default.toml` 注释含 "foo"；
   6. **场景 2 幂等**：`donkey init /tmp/ws`（已存在）→ exit 0；用户手动编辑过的 `instruction.md` 内容**不变**（mtime 不变）；
   7. **场景 2 子操作**（用户损坏恢复）：`rm /tmp/ws/instruction.md` 后 `donkey init /tmp/ws` → exit 0；该文件被补齐；
   8. **场景 3 模板重置**：`donkey init /tmp/ws --force` → exit 0；用户编辑过的 `instruction.md` 也被覆盖（恢复出厂内容）；用户自建的 `media/` 目录**不动**；
@@ -897,7 +901,7 @@ tests/e2e/phase/verify_phase_f<XXX>_p<Y>.py
 
 > **当前粒度**：1 Phase = 1 提示词文件（27 Phase = 27 文件）；如未来某 Phase 工作量超出 1 次 `/speckit.specify` 闭环（如 F004-P6 middleware 10 错误 + 10 中间件），需 Maintainer 显式决策拆 / 合（**不**自动推断；如拆：1 Phase 拆为 2 文件，文件名按"phase 编号 + 后缀"，如 `feature004_phase006_middleware_register.md` / `_runtime.md`）。
 >
-> **落地状态（v1 启动期）**：上表 27 个提示词文件中，**已就绪 3 个**——F001-P1 / F001-P2 / F001-P3（`harness/features/feature001_phase001_cli_validation.md` / `feature001_phase002_template_skeleton.md` / `feature001_phase003_builtin_tools.md`）；**其余 24 个待创建**（F002~F006），按上表"准入条件"列逐个解锁。
+> **落地状态（v1 启动期）**：上表 27 个提示词文件中，**已完成 1 个**（F001-P1）+ **已就绪 2 个**（F001-P2 / F001-P3）——`harness/features/feature001_phase001_cli_validation.md` / `feature001_phase002_template_skeleton.md` / `feature001_phase003_builtin_tools.md`；**其余 24 个待创建**（F002~F006），按上表"准入条件"列逐个解锁。
 >
 > **准入条件缩写**："F001-P1 退出条件" = §4.3 "退出条件" 全部跑出 PASS；"无前置" = 仓库初始化即可启动。
 >
@@ -907,7 +911,7 @@ tests/e2e/phase/verify_phase_f<XXX>_p<Y>.py
 
 | # | 提示词文件 | 覆盖 Phase | 段位 | 已用 exit code | 准入条件 | 验证脚本 | 闭环复杂度 |
 |---|---|---|---|---|---|---|---|
-| 1 | `feature001_phase001_cli_validation.md` | F001-P1 | `1-2` | 1, 2 | 无前置 | `verify_phase_f001_p1.py` | 低（6 断言） |
+| 1 | `feature001_phase001_cli_validation.md` | F001-P1 | `1-2` | 1, 2 | 无前置 | `verify_phase_f001_p1.py` | 低（7 断言） |
 | 2 | `feature001_phase002_template_skeleton.md` | F001-P2 | `3` | 3 | F001-P1 退出条件 | `verify_phase_f001_p2.py` | 中（14 断言） |
 | 3 | `feature001_phase003_builtin_tools.md` | F001-P3 | `4` | 4 | F001-P2 退出条件 | `verify_phase_f001_p3.py` | 中（11 断言） |
 | 4 | `feature002_phase001_static_format.md` | F002-P1 | `11-13` | 11, 12, 13 | F001 3 Phase 全退出 | `verify_phase_f002_p1.py` | 中 |

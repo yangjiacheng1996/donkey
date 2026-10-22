@@ -97,7 +97,7 @@ donkey 是一个**智能体材料层的可移植运行时引擎**——workspace
 ### 3.1 前置 Phase 已完成
 
 - **F001-P1 (`cli_validation`) 已完成**：7 个 verify 断言（场景 1 / 2 / 3 / 4 / 5 / 6 / 7）全部 PASS；`PathNotFoundError` / `PathPermissionError` 单测全绿。
-- **F001-P2 (`template_skeleton`) 已完成**：15 个 verify 断言（场景 1 ~ 15）全部 PASS；`TemplateGenerationError` 单测全绿（`tests/unit/test_template_skeleton.py` 至少 12 个用例）。
+- **F001-P2 (`template_skeleton`) 已完成**：14 个 verify 断言（场景 1 ~ 14）全部 PASS；`TemplateGenerationError` 单测全绿（`tests/unit/test_template_skeleton.py` 至少 14 个用例）。
 
 ### 3.2 本 Phase 不重复实现的接口契约（来自 F001-P1 / F001-P2，本 Phase 直接复用）
 
@@ -646,8 +646,8 @@ if __name__ == "__main__":
 **spec 要求**：
 
 - `format` 字段取值：`markdown` / `toml` / `json` / `python` / `text` / `directory` / `sqlite3`；
-- P3 追加的 `tools/__init__.py` + 3 个内置 tool + 3 个 Skills Level 3 示例 共 **7** 条新 entry（叠加 P1 的 3 条 + P2 的 43 条 → 累计 **46** 条）；
-- `load_template_manifest()` 在 P1 阶段已实现 schema 校验；本 Phase 不修改 manifest 加载逻辑——P2 的 `render_templates` 已能驱动新条目。
+- P3 追加的 `tools/__init__.py` + 3 个内置 tool + 3 个 Skills Level 3 示例 共 **7** 条新 entry（叠加 P1 的 3 条 + P2 的 43 条 → 累计 **46** 条 → **本 Phase 结束后累计 53 条**，即 v1 baseline）；
+- `load_template_manifest()` 由 **F001-P2** 实现并已做 schema 校验（F001-P1 只**建档**清单、**不加载不解析**，spec FR-029）；本 Phase 不修改 manifest 加载逻辑——P2 的 `render_templates` 已能驱动新条目。
 
 ### 4.8 单元测试（`tests/unit/test_builtin_tools.py`）
 
@@ -1025,7 +1025,7 @@ verify_phase_f001_p3.py 的 11 个 `test_*` 函数全部 PASS → F001-P3 完成
 1. **User Stories**：按优先级 P1 → P11 列出 11 个核心场景（对应 §6 的 11 个 verify 断言）；
 2. **Functional Requirements (FR-001 ~ FR-NNN)**：覆盖 §4 的 10 个子节（4.1 ~ 4.10），含 9 个 `@tool` 函数签名、Skills 三层文件清单、manifest 追加条目；FR 中如需引用 F001-P1 / F001-P2 已实现的函数（`validate_init_request` / `render_templates` / `init_workspace_inner` 等），仅引用**函数签名与行为契约**，不复述其实现细节（详见 §3.2 函数契约小节）；
 3. **Edge Cases**：本 Phase 边界条件（用户自定义 `tools/*.py` 不被 `--force` 删 / 用户 rm builtin tool 后 init 补齐 / Skills Level 3 目录被 `--force` 递归清空 / 等）；
-4. **Success Criteria (SC-001 ~ SC-NNN)**：可量化的退出条件（"11 个 verify 断言全部 PASS"、"F001-P1 7 个 + F001-P2 15 个断言仍全绿"、"单测 8 个 + 集成测试 3 个 + verify 11 个全绿"、"ruff + mypy 零 error"等）；
+4. **Success Criteria (SC-001 ~ SC-NNN)**：可量化的退出条件（"11 个 verify 断言全部 PASS"、"F001-P1 7 个 + F001-P2 14 个断言仍全绿"、"单测 8 个 + 集成测试 3 个 + verify 11 个全绿"、"ruff + mypy 零 error"等）；
 5. **Key Entities**：`BuiltinToolGenerationError` 异常类；`filesystem.read_file` / `write_file` / `copy_file` / `move_file` / `delete_file` / `list_dir` / `stat` / `commandline.run_shell` / `webfetch.fetch_url` 共 9 个 `@tool` 工具函数；Skills Level 1/2/3 三层模型；
 6. **Assumptions**：F001-P1 (`cli_validation`) + F001-P2 (`template_skeleton`) 均已完成并退出；`langchain_core.tools.tool` 装饰器可用；`httpx` 与 `pytest-httpx` 已安装。
 

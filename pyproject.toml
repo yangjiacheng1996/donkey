@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "donkey"
+version = "0.1.0"
+description = "donkey —— 面向个人开发者的 workspace 与 agent 运行框架"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-cov", "ruff", "mypy"]
+
+[project.scripts]
+donkey = "donkey.cli.cli_client:main"
+
+[tool.setuptools.packages.find]
+include = ["donkey*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+"donkey.core.workspace.templates" = ["**/*.txt", "**/*.json"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["donkey", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.isort]
+# 仓库根即包根（``donkey/`` 与 ``tests/`` 同级），``src`` 下的 ``donkey`` 目录
+# 名为包名而非源码根，故显式声明本包为第一方，import 分组才与分层一致。
+known-first-party = ["donkey"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+explicit_package_bases = true
+mypy_path = "."
+files = ["donkey"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_any_generics = false
+disallow_untyped_calls = false
+disallow_untyped_decorators = false
+warn_return_any = false
+warn_unused_ignores = false
+no_implicit_reexport = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+python_files = ["test_*.py", "verify_phase_*.py"]

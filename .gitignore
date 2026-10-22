@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# OS / 编辑器通用产物
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp

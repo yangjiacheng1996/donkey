@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "entries": [
+    { "path": "instruction.md", "format": "markdown" },
+    { "path": "providers/default.toml", "format": "toml" },
+    { "path": "mcp/mcp.json", "format": "json" }
+  ]
+}

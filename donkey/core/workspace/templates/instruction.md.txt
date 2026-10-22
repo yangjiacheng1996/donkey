@@ -1,0 +1,10 @@
+# {{workspace_name}}
+
+本文件是 F001-P2 模板骨架渲染的源文件占位（F001-P1 只建档、不加载、不渲染）。
+
+- workspace 名称：{{workspace_name}}
+- workspace 绝对路径：{{workspace_path}}
+
+## 职责
+
+待 F001-P2 填充。
