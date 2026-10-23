@@ -1,0 +1,596 @@
+"""文件系统的 `@tool` 集合 —— donkey 工作区内置工具。
+
+本模块属于**材料层**（工作区），由 `donkey init` 生成，可由用户编辑或删除。
+删除它之后，文件类操作不可用，但工作区的其它能力不受影响。
+
+本模块**刻意不提供**"按文件名找 / 按内容找"的能力 —— 那类检索属引擎侧的
+检索中间件职责，与内置工具职责正交，不在此实现。
+
+每个**会改文件**的工具都返回一份**变更记录**（返回结果 JSON 的 ``change``
+字段），由 ``tools/changes`` 生成：原子写入、旧内容与新内容的指纹、统一
+差异、可选的"只算不写"预览，以及一个期望指纹的乐观锁守卫。引擎层因此可在
+将来渲染差异、请人确认或回滚，而**不需要**改动本文件（v1 本身不承诺差异
+审阅 —— 立项书 AC-5）。
+
+编辑本文件时**不要**把 ``atomic_write_bytes`` 换成 ``Path.write_text``：
+就地覆盖会毁掉旧内容，使将来的差异展示 / 回滚无从谈起。
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+from pathlib import Path
+from typing import Any
+
+from langchain_core.tools import tool
+
+try:  # 常规情形：作为工作区 ``tools`` 包的一部分被导入
+    from .changes import (
+        atomic_write_bytes,
+        build_change_record,
+        check_expected_hash,
+        read_existing_bytes,
+        resolve_path,
+        sha256_bytes,
+    )
+except ImportError:  # pragma: no cover - 以顶层模块形态加载时的回退路径
+    from changes import (  # type: ignore[no-redef]
+        atomic_write_bytes,
+        build_change_record,
+        check_expected_hash,
+        read_existing_bytes,
+        resolve_path,
+        sha256_bytes,
+    )
+
+#: 单次读取返回的**行数**上限。**无条件**生效 —— 与体积上限先到者生效。
+MAX_READ_LINES = 2000
+
+#: 单次读取返回的**字节**上限（50 KiB）。与行数上限先到者生效。
+MAX_READ_BYTES = 50 * 1024
+
+#: 单行**字符**上限（仅读取侧）。超出的行被截断并附截断标记。
+MAX_LINE_CHARS = 2000
+
+#: 二进制 / 媒体文件的魔数前缀 —— 命中即报错（MUST NOT 返回乱码）。
+_BINARY_MAGIC = (
+    b"\x89PNG\r\n\x1a\n",  # PNG
+    b"\xff\xd8\xff",  # JPEG
+    b"GIF87a",  # GIF
+    b"GIF89a",  # GIF
+    b"%PDF-",  # PDF
+    b"PK\x03\x04",  # ZIP
+)
+
+
+@tool
+def read_file(path: str, start_line: int = 1, num_lines: int | None = None) -> str:
+    """读取文件内容，返回带页范围说明头与行号前缀的**呈现文本**。
+
+    返回值不是纯正文 —— 首行是页范围说明头，每一行带 ``<行号>: `` 前缀；
+    发生截断时末尾附续读指针。去掉这层包装，剩下的就是文件正文。
+
+    Args:
+        path: 绝对路径，或相对于**工作区根**的路径。
+        start_line: 起始行号（**1 基**，默认 ``1`` = 从头读）。
+        num_lines: 读取的行数（默认 ``None`` = 一直读到文件末尾）。用它可以
+            只读差异区块附近的内容，而不必把整个文件读进来。
+
+    Returns:
+        呈现文本；空文件返回 ``Read file <路径>, 0 lines``。
+
+    Raises:
+        FileNotFoundError: 路径不存在。
+        ValueError: 起始行越界，或目标是二进制 / 图片 / PDF（媒体附件属引擎层
+            职责，此处明确报错而不返回乱码）。
+    """
+    p = resolve_path(path)
+    if p.is_dir():
+        return _read_directory(path, p, start_line, num_lines)
+    if not p.exists():
+        raise FileNotFoundError(f"no such file: {p}")
+
+    text = _decode_file(p)
+    lines = _content_lines(text)
+    total = len(lines)
+
+    if start_line < 1:
+        raise ValueError(f"start_line must be >= 1, got {start_line}")
+    if total == 0:
+        if start_line > 1:
+            raise ValueError(f"start_line {start_line} is out of range (file has 0 lines)")
+        return f"Read file {path}, 0 lines"
+    if start_line > total:
+        raise ValueError(f"start_line {start_line} is out of range (file has {total} lines)")
+
+    begin = start_line - 1
+    end = total if num_lines is None else begin + max(num_lines, 0)
+    selected = lines[begin:end]
+
+    kept: list[str] = []
+    used_bytes = 0
+    truncated = False
+    for raw in selected:
+        if len(kept) >= MAX_READ_LINES:
+            truncated = True
+            break
+        display = _truncate_line(raw)
+        cost = len(display.encode("utf-8")) + 1
+        if kept and used_bytes + cost > MAX_READ_BYTES:
+            truncated = True
+            break
+        used_bytes += cost
+        kept.append(display)
+
+    if not kept:
+        return f"Read file {path}, 0 lines"
+
+    out = [f"Read file {path}, lines {start_line}-{start_line + len(kept) - 1}"]
+    for offset, content in enumerate(kept):
+        out.append(f"{start_line + offset}: {content}")
+    if truncated:
+        out.append(
+            f"[Output truncated. Continue reading with offset: {start_line + len(kept)}]"
+        )
+        return "\n".join(out)
+
+    rendered = "\n".join(out)
+    # 整份返回时保留原文结尾的换行 —— 去掉页范围头与行号前缀后，呈现文本
+    # MUST 与文件正文逐字一致（连结尾换行也在内）。
+    if start_line == 1 and num_lines is None and text.endswith("\n"):
+        rendered += "\n"
+    return rendered
+
+
+@tool
+def write_file(
+    path: str,
+    content: str,
+    dry_run: bool = False,
+    include_previous: bool = False,
+    expected_hash: str | None = None,
+) -> str:
+    """把 ``content`` 原子地写入 ``path``，并返回一份**变更记录**。
+
+    写入是原子的（临时文件 + ``os.replace``）：任何环节失败，旧内容都完好
+    无损。返回的记录含旧内容与新内容的指纹、统一差异与动作（``create`` /
+    ``update``），使引擎层将来可以在此之上构建差异审阅。
+
+    Args:
+        path: 绝对路径，或相对于**工作区根**的路径。父目录不存在时自动创建。
+        content: 要写入的文本内容（UTF-8）。
+        dry_run: 为 ``True`` 时**只算不写** —— 零磁盘副作用（不建父目录、不写
+            文件、不留临时文件），但仍返回完整的变更记录（``applied`` 为假）。
+        include_previous: 为 ``True`` 时在记录里附带旧正文全文（便于回滚；
+            旧正文超过 256 KiB 时改为只给"已省略"标记）。
+        expected_hash: 调用方最后读到的文件指纹（``sha256:...``）。文件在此
+            期间被改动过时，本次写入被拒绝并抛出
+            ``tools.changes.FileChangedError``（乐观锁，防覆盖别人的改动）。
+
+    Returns:
+        JSON 文本，含 ``path`` / ``action`` / ``bytes_written`` / ``applied``
+        与 ``change`` 记录。
+
+    Raises:
+        IsADirectoryError: 目标已存在且是目录。
+        FileChangedError: ``expected_hash`` 与当前内容不匹配（无任何磁盘副作用）。
+        PermissionError: 目标或其父目录不可写。
+    """
+    p = resolve_path(path)
+    if p.exists() and p.is_dir():
+        raise IsADirectoryError(f"target is a directory: {p}")
+
+    previous_bytes = read_existing_bytes(p)
+    check_expected_hash(p, expected_hash)
+
+    new_bytes = content.encode("utf-8")
+    action = "update" if previous_bytes is not None else "create"
+    record = build_change_record(
+        action, p, previous_bytes, new_bytes, include_previous=include_previous
+    )
+
+    if dry_run:
+        return _json_result(
+            {
+                "path": str(p),
+                "action": action,
+                "bytes_written": len(new_bytes),
+                "applied": False,
+                "change": record,
+            }
+        )
+
+    atomic_write_bytes(p, new_bytes)
+    record["applied"] = True
+    return _json_result(
+        {
+            "path": str(p),
+            "action": action,
+            "bytes_written": len(new_bytes),
+            "applied": True,
+            "change": record,
+        }
+    )
+
+
+@tool
+def copy_file(
+    src: str,
+    dst: str,
+    dry_run: bool = False,
+    expected_hash: str | None = None,
+) -> str:
+    """把文件从 ``src`` 复制到 ``dst``，并返回一份**变更记录**。
+
+    复制是原子的（临时文件 + ``os.replace``），变更记录描述的是**目标路径**。
+
+    Args:
+        src: 源路径（绝对，或相对于**工作区根**）。
+        dst: 目标路径（绝对，或相对于**工作区根**）；父目录不存在时自动创建。
+        dry_run: 为 ``True`` 时**只算不写** —— 零磁盘副作用，但仍返回完整的
+            变更记录（``applied`` 为假）。
+        expected_hash: 调用方最后读到的**目标**文件指纹。不匹配时拒绝执行并
+            抛出 ``tools.changes.FileChangedError``。
+
+    Returns:
+        JSON 文本，含 ``src`` / ``dst`` / ``action``（``copy``）/ ``applied``
+        与描述目标路径的 ``change`` 记录（额外含 ``src`` 与 ``src_rel_path``）。
+
+    Raises:
+        FileNotFoundError: 源文件不存在。
+        IsADirectoryError: 源或目标是目录。
+        FileChangedError: ``expected_hash`` 与目标当前内容不匹配。
+    """
+    p_src = resolve_path(src)
+    p_dst = resolve_path(dst)
+    if not p_src.exists():
+        raise FileNotFoundError(f"no such file: {p_src}")
+    if p_src.is_dir():
+        raise IsADirectoryError(f"source is a directory: {p_src}")
+    if p_dst.exists() and p_dst.is_dir():
+        raise IsADirectoryError(f"target is a directory: {p_dst}")
+
+    source_bytes = p_src.read_bytes()
+    previous_bytes = read_existing_bytes(p_dst)
+    check_expected_hash(p_dst, expected_hash)
+
+    record = build_change_record("copy", p_dst, previous_bytes, source_bytes, src=p_src)
+
+    if dry_run:
+        return _json_result(
+            {
+                "src": str(p_src),
+                "dst": str(p_dst),
+                "action": "copy",
+                "applied": False,
+                "change": record,
+            }
+        )
+
+    atomic_write_bytes(p_dst, source_bytes)
+    try:
+        shutil.copystat(p_src, p_dst)
+    except OSError:
+        # 元数据复制失败 MUST 被忽略 —— 它不影响内容正确性。
+        pass
+    record["applied"] = True
+    return _json_result(
+        {
+            "src": str(p_src),
+            "dst": str(p_dst),
+            "action": "copy",
+            "applied": True,
+            "change": record,
+        }
+    )
+
+
+@tool
+def move_file(
+    src: str,
+    dst: str,
+    dry_run: bool = False,
+    expected_hash: str | None = None,
+) -> str:
+    """把文件从 ``src`` 移动到 ``dst``，并返回一份**变更记录**。
+
+    变更记录描述的是**目标路径**；源路径以 ``src`` / ``src_rel_path`` 两个
+    字段附在记录里。
+
+    Args:
+        src: 源路径（绝对，或相对于**工作区根**）。
+        dst: 目标路径（绝对，或相对于**工作区根**）；父目录不存在时自动创建。
+        dry_run: 为 ``True`` 时**只算不写** —— 零磁盘副作用（源不会被移走），
+            但仍返回完整的变更记录（``applied`` 为假）。
+        expected_hash: 调用方最后读到的**目标**文件指纹。不匹配时拒绝执行并
+            抛出 ``tools.changes.FileChangedError``。
+
+    Returns:
+        JSON 文本，含 ``src`` / ``dst`` / ``action``（``move``）/ ``applied``
+        与描述目标路径的 ``change`` 记录。
+
+    Raises:
+        FileNotFoundError: 源文件不存在。
+        IsADirectoryError: 源或目标是目录。
+        FileChangedError: ``expected_hash`` 与目标当前内容不匹配。
+    """
+    p_src = resolve_path(src)
+    p_dst = resolve_path(dst)
+    if not p_src.exists():
+        raise FileNotFoundError(f"no such file: {p_src}")
+    if p_src.is_dir():
+        raise IsADirectoryError(f"source is a directory: {p_src}")
+    if p_dst.exists() and p_dst.is_dir():
+        raise IsADirectoryError(f"target is a directory: {p_dst}")
+
+    source_bytes = p_src.read_bytes()
+    previous_bytes = read_existing_bytes(p_dst)
+    check_expected_hash(p_dst, expected_hash)
+
+    record = build_change_record("move", p_dst, previous_bytes, source_bytes, src=p_src)
+
+    if dry_run:
+        return _json_result(
+            {
+                "src": str(p_src),
+                "dst": str(p_dst),
+                "action": "move",
+                "applied": False,
+                "change": record,
+            }
+        )
+
+    p_dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(p_src), str(p_dst))
+    record["applied"] = True
+    return _json_result(
+        {
+            "src": str(p_src),
+            "dst": str(p_dst),
+            "action": "move",
+            "applied": True,
+            "change": record,
+        }
+    )
+
+
+@tool
+def delete_file(
+    path: str,
+    include_previous: bool = False,
+    dry_run: bool = False,
+    expected_hash: str | None = None,
+) -> str:
+    """删除一个文件或一整棵目录树，并返回一份**变更记录**。
+
+    目录按**目录粒度**记录 —— v1 不枚举被删目录内的逐文件差异。
+
+    Args:
+        path: 要删除的路径（绝对，或相对于**工作区根**）。
+        include_previous: 为 ``True`` 且目标是**文件**时，在记录里附带旧正文
+            全文（便于回滚）。目标是目录时不出现任何旧正文字段。
+        dry_run: 为 ``True`` 时**只算不写** —— 零磁盘副作用（文件不会被删），
+            但仍返回完整的变更记录（``applied`` 为假）。
+        expected_hash: 调用方最后读到的文件指纹。不匹配时拒绝执行并抛出
+            ``tools.changes.FileChangedError``。
+
+    Returns:
+        JSON 文本，含 ``path`` / ``type``（``file`` 或 ``directory``）/
+        ``action``（``delete``）/ ``applied`` 与 ``change`` 记录。
+
+    Raises:
+        FileNotFoundError: 路径不存在。
+        FileChangedError: ``expected_hash`` 与当前内容不匹配（无任何磁盘副作用）。
+    """
+    p = resolve_path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"no such file: {p}")
+
+    if p.is_dir():
+        previous_bytes = None
+        if expected_hash:
+            raise FileChangedError(
+                f"{p} is a directory; the expected hash does not match"
+            )
+        kind = "directory"
+    else:
+        previous_bytes = read_existing_bytes(p)
+        check_expected_hash(p, expected_hash)
+        kind = "file"
+
+    record = build_change_record(
+        "delete", p, previous_bytes, None, include_previous=include_previous
+    )
+
+    if dry_run:
+        return _json_result(
+            {
+                "path": str(p),
+                "type": kind,
+                "action": "delete",
+                "applied": False,
+                "change": record,
+            }
+        )
+
+    if kind == "directory":
+        shutil.rmtree(p)
+    else:
+        p.unlink()
+    record["applied"] = True
+    return _json_result(
+        {
+            "path": str(p),
+            "type": kind,
+            "action": "delete",
+            "applied": True,
+            "change": record,
+        }
+    )
+
+
+@tool
+def list_dir(
+    path: str,
+    include_hidden: bool = True,
+    offset: int = 0,
+    limit: int | None = None,
+) -> list[str]:
+    """列出目录的**直接**子项名称（非递归）。
+
+    Args:
+        path: 目录路径（绝对，或相对于**工作区根**）。
+        include_hidden: 为 ``False`` 时跳过点开头的条目。默认 ``True`` —— 这是
+            旧行为（列出全部子项）；原子写用的临时文件以点开头且立即被删除。
+        offset: 跳过的条目数（**0 基**，默认 ``0``）。
+        limit: 最多返回多少条目（默认 ``None`` = 不限）。上限为 2000 —— 请求
+            更大的值会被截到 2000，MUST NOT 报错。
+
+    Returns:
+        子项**名称**列表（不含路径），按名称代码点序排序。
+
+    Raises:
+        FileNotFoundError: 路径不存在。
+        NotADirectoryError: 路径不是目录。
+    """
+    p = resolve_path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"no such directory: {p}")
+    if not p.is_dir():
+        raise NotADirectoryError(f"not a directory: {p}")
+
+    names = sorted(item.name for item in p.iterdir())
+    if not include_hidden:
+        names = [name for name in names if not name.startswith(".")]
+
+    start = max(offset, 0)
+    if limit is None:
+        selected = names[start:]
+    else:
+        selected = names[start : start + max(limit, 0)]
+    return selected[:MAX_READ_LINES]
+
+
+@tool
+def stat(path: str, with_hash: bool = False) -> dict[str, Any]:
+    """取文件 / 目录的元数据。
+
+    Args:
+        path: 要查看的路径（绝对，或相对于**工作区根**）。
+        with_hash: 为 ``True`` 且目标是普通文件时，额外计算文件内容的
+            ``sha256`` 指纹（形如 ``sha256:<hex>``，与契约库同格式）。
+
+    Returns:
+        映射，含 ``size``（字节）/ ``mtime``（epoch 秒，浮点）/ ``is_file`` /
+        ``is_dir`` / ``exists``；``with_hash`` 为真且是普通文件时追加 ``sha256``。
+        路径不存在时返回 ``exists`` 为假的映射 —— MUST NOT 抛异常。
+
+    Raises:
+        PermissionError: ``stat`` 系统调用失败（权限不足等）。
+    """
+    p = resolve_path(path)
+    try:
+        st = p.stat()
+    except (FileNotFoundError, NotADirectoryError):
+        return {
+            "size": 0,
+            "mtime": 0.0,
+            "is_file": False,
+            "is_dir": False,
+            "exists": False,
+        }
+    result: dict[str, Any] = {
+        "size": st.st_size,
+        "mtime": st.st_mtime,
+        "is_file": p.is_file(),
+        "is_dir": p.is_dir(),
+        "exists": True,
+    }
+    if with_hash and p.is_file():
+        result["sha256"] = sha256_bytes(p.read_bytes())
+    return result
+
+
+# --- 内部辅助 -------------------------------------------------------------------
+
+
+def _json_result(payload: dict[str, Any]) -> str:
+    """把结果映射编码成 JSON 文本（非 ASCII 原样保留）。"""
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _content_lines(text: str) -> list[str]:
+    """按 ``\\n`` 切分正文（不含行尾换行符）。
+
+    行界**只有** ``\\n`` —— MUST NOT 使用 ``str.splitlines()``（后者还会把
+    ``\\v`` / ``\\u2028`` 等当作行界，会让行号与实际行号对不齐）。
+    """
+    if not text:
+        return []
+    parts = text.split("\n")
+    if parts[-1] == "":
+        parts = parts[:-1]
+    return parts
+
+
+def _truncate_line(line: str) -> str:
+    """把超长的单行截断到字符上限，并附截断标记。"""
+    if len(line) > MAX_LINE_CHARS:
+        return line[:MAX_LINE_CHARS] + f"... (line truncated to {MAX_LINE_CHARS} chars)"
+    return line
+
+
+def _decode_file(path: Path) -> str:
+    """读取并解码文件；二进制 / 图片 / PDF 一律报错。"""
+    data = path.read_bytes()
+    if b"\x00" in data or any(data.startswith(magic) for magic in _BINARY_MAGIC):
+        raise ValueError(f"cannot read binary or media file: {path}")
+    # 非法 UTF-8 按容错方式替换，MUST NOT 抛解码异常。
+    return data.decode("utf-8", errors="replace")
+
+
+def _read_directory(
+    path: str,
+    p: Path,
+    start_line: int,
+    num_lines: int | None,
+) -> str:
+    """``read_file`` 的目录分支 —— 按条目呈现目录内容。"""
+    entries = sorted(item.name for item in p.iterdir())
+    total = len(entries)
+
+    if start_line < 1:
+        raise ValueError(f"start_line must be >= 1, got {start_line}")
+    if total == 0:
+        if start_line > 1:
+            raise ValueError(
+                f"start_line {start_line} is out of range (directory has 0 entries)"
+            )
+        return f"Read directory {path}, entries 0"
+
+    begin = start_line - 1
+    end = total if num_lines is None else begin + max(num_lines, 0)
+    selected = entries[begin:end]
+
+    kept: list[str] = []
+    used_bytes = 0
+    truncated = False
+    for name in selected:
+        if len(kept) >= MAX_READ_LINES:
+            truncated = True
+            break
+        cost = len(name.encode("utf-8")) + 1
+        if kept and used_bytes + cost > MAX_READ_BYTES:
+            truncated = True
+            break
+        used_bytes += cost
+        kept.append(name)
+
+    out = [f"Read directory {path}, entries {start_line}-{start_line + len(kept) - 1}"]
+    out.extend(kept)
+    if truncated:
+        out.append(
+            f"[Output truncated. Continue reading with offset: {start_line + len(kept)}]"
+        )
+    return "\n".join(out)

@@ -51,6 +51,16 @@ _SQLITE3_BUILDERS = {
     "knowledge.sqlite3": build_knowledge_sqlite,
 }
 
+#: **契约库**（变更记录契约）在强制重置下的条目级豁免（spec FR-105 / research.md R-07）。
+#:
+#: 契约库与用户的自写工具**是一套的** —— 它已是工作区的"活代码"，覆盖它等于
+#: 单方面毁掉用户代码的依赖。故带强制标志时，一旦工作区里已存在契约库，
+#: MUST 保留它原样。
+#:
+#: 该豁免只作用于**这一个**条目 —— P2 的通用通则（清单内文本条目带强制标志
+#: 时先删后重建）对其余全部条目原样成立（spec FR-069）。
+_FORCE_EXEMPT_ENTRY = "tools/changes.py"
+
 
 def check_path(path: str | Path) -> Path:
     """把输入路径解析为绝对路径，并校验其作为 workspace 根的合法性。
@@ -467,6 +477,43 @@ def render_templates(
     return created, skipped
 
 
+def _entries_for_render(
+    workspace_path: Path,
+    manifest_entries: list[dict[str, Any]],
+    force: bool,
+) -> tuple[list[dict[str, Any]], int]:
+    """算出传给渲染器的条目列表，以及被豁免而计入"跳过"的条目数。
+
+    **条目级强制重置豁免**（spec FR-105 / research.md R-07）：带强制标志且
+    工作区里**已存在**契约库时，把契约库条目从渲染列表中剔除 —— 契约库
+    保留原样，不被覆盖。
+
+    约束：
+
+    - MUST 过滤进**一个新列表变量** —— MUST NOT 就地改写 ``manifest_entries``
+      （``templates_loaded`` 取的是原始列表长度，就地过滤会让它变成 53）；
+    - MUST 只豁免契约库**一个**条目 —— P2 的通用通则对其余条目原样成立
+      （spec FR-069）；
+    - ``render_templates`` 本身**一字不改**（通用渲染器 MUST NOT 被污染）；
+    - 契约库**不存在**时 MUST 按出厂内容正常创建（与"无则增"通则一致）。
+
+    返回：``(渲染用条目列表, 计入 skipped 的条目数)``。
+    """
+    if not force:
+        return manifest_entries, 0
+
+    exempt_target = Path(workspace_path) / _FORCE_EXEMPT_ENTRY
+    if not exempt_target.exists():
+        return manifest_entries, 0
+
+    filtered = [
+        entry
+        for entry in manifest_entries
+        if entry.get("path") != _FORCE_EXEMPT_ENTRY
+    ]
+    return filtered, 1
+
+
 def init_workspace_inner(
     path: str | Path,
     name: str | None,
@@ -505,9 +552,14 @@ def init_workspace_inner(
             f"创建 workspace 根目录失败：{abs_path}（{exc}）。{_NEXT_STEP}"
         ) from exc
 
-    created, skipped = render_templates(
-        abs_path, resolved_name, resolved_force, manifest_entries
+    entries_for_render, exempt_skipped = _entries_for_render(
+        abs_path, manifest_entries, resolved_force
     )
+    created, skipped = render_templates(
+        abs_path, resolved_name, resolved_force, entries_for_render
+    )
+    # 被豁免而保留的契约库计入"跳过" —— 它确实没有被创建。
+    skipped += exempt_skipped
 
     write_workspace_manifest(abs_path, resolved_name, resolved_force)
 

@@ -731,19 +731,19 @@ _OBSERVABILITY_NEEDLE = re.compile(r"lang[_-]?smith", re.IGNORECASE)
 
 
 def test_template_assets_render_to_expected_tree(tmp_path: Path) -> None:
-    """T018 / SC-003：以安装包内**真实资产**渲染 → 41 文件 / 7 目录 / 46·40·0。"""
+    """T018 / SC-003：以安装包内**真实资产**渲染 → 49 文件 / 10 目录 / 54·48·0。"""
     result = init_workspace(tmp_path)
 
-    assert result.templates_loaded == 46
-    assert result.files_created == 40
+    assert result.templates_loaded == 54
+    assert result.files_created == 48
     assert result.files_skipped == 0
 
     files = [p for p in tmp_path.rglob("*") if p.is_file()]
     directories = [p for p in tmp_path.rglob("*") if p.is_dir()]
-    # 41 个文件 = 37 文本 + 3 sqlite3 + 1 工作区清单
-    assert len(files) == 41
-    # 7 个目录 = 根 + 5 必填 + skills/example
-    assert len(directories) + 1 == 7
+    # 49 个文件 = 48 个清单文件型条目 + 1 份工作区清单
+    assert len(files) == 49
+    # 10 个目录 = 根 + 6 个清单目录 + 3 个 Skill Level 3 子目录
+    assert len(directories) + 1 == 10
     assert (tmp_path / "manifest.json").is_file()
 
     # 渲染结果中 MUST 无占位符残留（spec SC-014 / 契约 B12）
@@ -814,7 +814,22 @@ def test_dir_readme_templates_content(tmp_path: Path) -> None:
     tools_doc = (DEFAULT_TEMPLATES_ROOT / "tools" / "README.md.txt").read_text(encoding="utf-8")
     for keyword in ("命名", "参数", "错误处理", "超时"):
         assert keyword in tools_doc, keyword
-    assert "内置工具由后续阶段生成" in tools_doc
+    # F001-P3 起该正文已被**覆盖**为完整的工具开发规范 —— 8 项必备要点齐备
+    # （spec FR-044 (a) ~ (h)）。
+    for keyword in (
+        "langchain_core.tools",  # (a) 工具装饰器的官方导入位置
+        "docstring",  # (b) 函数必须有说明文字
+        "路径白名单",  # (c) 路径白名单由用户自管
+        "60",  # (d) 推荐的超时配置（命令 60 秒 · 网络 30 秒）
+        "错误处理",  # (e) 错误处理建议
+        "工作区根",  # (f) 工作区根的推导方式
+        "备份",  # (g) 契约库与用户自写工具是一套的
+        "httpx",  # (h) 网络工具需自行安装 HTTP 客户端库
+    ):
+        assert keyword in tools_doc, keyword
+    # 契约库**是契约库、不是工具**（spec FR-046）+ 变更记录契约小节（FR-045）
+    assert "不是工具" in tools_doc
+    assert "改文件的工具怎么写" in tools_doc
 
     mcp_doc = (DEFAULT_TEMPLATES_ROOT / "mcp" / "README.md.txt").read_text(encoding="utf-8")
     assert "mcpServers" in mcp_doc
@@ -1091,17 +1106,36 @@ def test_init_after_full_removal_equals_fresh(tmp_path: Path) -> None:
     assert second == first
 
 
-def test_no_builtin_tool_files_generated(tmp_path: Path) -> None:
-    """T055 / US11 / SC-016：不生成内置工具文件、Python 入口文件与子智能体相关内容。"""
+def test_builtin_tool_files_generated_without_agent_entry(tmp_path: Path) -> None:
+    """T055 / US11 / SC-016：内置工具文件已就位，且不含智能体入口与子智能体内容。
+
+    F001-P3 起这 4 个文件是**清单内条目**（spec FR-053）—— P2 阶段的
+    "尚未生成"否定断言已按 spec FR-068(b) 改写。
+    """
     workspace = tmp_path / "ws"
     init_workspace(workspace)
 
     for name in ("filesystem.py", "commandline.py", "webfetch.py", "__init__.py"):
-        assert not (workspace / "tools" / name).exists(), name
+        assert (workspace / "tools" / name).is_file(), name
     assert (workspace / "tools" / "README.md").is_file()
 
-    # 全量扫描 MUST 无任何 ``.py`` 文件
-    assert [p for p in workspace.rglob("*.py")] == []
+    # 除本 Phase 新增的 6 个 ``.py`` 文件外无其它 ``.py`` 文件
+    python_files = {p.relative_to(workspace).as_posix() for p in workspace.rglob("*.py")}
+    assert python_files == {
+        "tools/__init__.py",
+        "tools/changes.py",
+        "tools/filesystem.py",
+        "tools/commandline.py",
+        "tools/webfetch.py",
+        "skills/example/scripts/example.py",
+    }
+
+    # 持久不变量：工作区内无**智能体入口文件** —— Skill 第三层演示脚本获
+    # 宪法 §6.3 例外 E-02 + §5 章 [D-19] 授权，**不计入**该不变量的违例
+    # （spec FR-050 / FR-068(b)）。
+    file_names = {p.name for p in workspace.rglob("*") if p.is_file()}
+    assert "agent.py" not in file_names
+    assert "main.py" not in file_names
 
     # MUST 无子智能体相关目录
     directories = {p.name.lower() for p in workspace.rglob("*") if p.is_dir()}
@@ -1127,7 +1161,7 @@ def test_init_does_not_validate_provider_content(tmp_path: Path) -> None:
 
     result = init_workspace(workspace)
 
-    assert result.templates_loaded == 46
+    assert result.templates_loaded == 54
     # 故意损坏的内容原样保留（init 不做内容判定）
     assert (workspace / "providers" / "default.toml").read_text(encoding="utf-8") == (
         "这不是合法的 TOML {{{"
@@ -1222,8 +1256,8 @@ def test_memory_readme_template_content(tmp_path: Path) -> None:
     assert "运行数据可选择性导出" in content
 
 
-def test_exit_code_set_is_exactly_0_to_3() -> None:
-    """T074 / FR-037 / SC-010 / SC-021：本阶段使用的退出码集合恰为 {0, 1, 2, 3}。"""
+def test_exit_code_set_is_exactly_0_to_4() -> None:
+    """T074 / FR-037 / SC-010 / SC-021：本阶段使用的退出码集合恰为 {0, 1, 2, 3, 4}。"""
     import tomllib
 
     from donkey.cli import cli_client
@@ -1247,9 +1281,9 @@ def test_exit_code_set_is_exactly_0_to_3() -> None:
     assert segment_constants
     assert all(isinstance(value, tuple) for value in segment_constants.values())
 
-    # ① 本阶段**实际使用**的退出码恰为 {0, 1, 2, 3}
+    # ① 本阶段**实际使用**的退出码恰为 {0, 1, 2, 3, 4}
     used = {exit_codes.EXIT_CODE_OK} | set(cli_client._EXCEPTION_TO_EXIT_CODE.values())
-    assert used == {0, 1, 2, 3}
+    assert used == {0, 1, 2, 3, 4}
     assert set(int_constants) - {"EXIT_CODE_BUILTIN_TOOL_GENERATION"} == {
         "EXIT_CODE_OK",
         "EXIT_CODE_PATH_NOT_FOUND",
@@ -1257,13 +1291,13 @@ def test_exit_code_set_is_exactly_0_to_3() -> None:
         "EXIT_CODE_TEMPLATE_GENERATION",
     }
 
-    # ② 映射表登记的码值集合恰为 {1, 2, 3}；基类不登记（未登记子类兜底 1）
-    assert set(cli_client._EXCEPTION_TO_EXIT_CODE.values()) == {1, 2, 3}
+    # ② 映射表登记的码值集合恰为 {1, 2, 3, 4}；基类不登记（未登记子类兜底 1）
+    assert set(cli_client._EXCEPTION_TO_EXIT_CODE.values()) == {1, 2, 3, 4}
     assert WorkspaceInitError not in cli_client._EXCEPTION_TO_EXIT_CODE
 
-    # ③ 退出码 4 已建档但本阶段不触发；5-10 未定义
+    # ③ 退出码 4 已在本阶段启用（内置工具生成失败）；5-10 未定义
     assert exit_codes.EXIT_CODE_BUILTIN_TOOL_GENERATION == 4
-    assert exit_codes.EXIT_CODE_BUILTIN_TOOL_GENERATION not in used
+    assert exit_codes.EXIT_CODE_BUILTIN_TOOL_GENERATION in used
     assert not any(5 <= value <= 10 for value in int_constants.values())
 
     # ④ 运行期依赖恰为 1 个 —— 上游 saver 包
@@ -1451,7 +1485,7 @@ def test_broken_memory_template_preserved_without_force(tmp_path: Path) -> None:
 
     result = init_workspace(workspace)
 
-    assert result.templates_loaded == 46
+    assert result.templates_loaded == 54
     assert db_path.read_text(encoding="utf-8") == "这不是 sqlite3 文件"
 
 

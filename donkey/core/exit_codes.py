@@ -10,8 +10,9 @@
 | ``31-100``| ``donkey run``    |
 
 F001-P1（``cli_validation``）只使用 ``0`` / ``1`` / ``2``；F001-P2
-（``template_skeleton``）启用 ``3``（模板骨架生成失败）；``4`` / ``5-10``
-属后续阶段，MUST NOT 被本阶段任何代码路径触发（spec FR-037）。
+（``template_skeleton``）启用 ``3``（模板骨架生成失败）；F001-P3
+（``builtin_tools``）启用 ``4``（内置工具生成失败）；``5-10``
+属后续阶段，MUST NOT 被本阶段任何代码路径触发（spec FR-074）。
 """
 
 # --- 本阶段实际使用的退出码 ---------------------------------------------------
@@ -24,10 +25,7 @@ EXIT_CODE_PATH_NOT_FOUND = 1
 EXIT_CODE_PATH_PERMISSION = 2
 #: 模板骨架生成失败（``TemplateGenerationError``）—— 本阶段启用。
 EXIT_CODE_TEMPLATE_GENERATION = 3
-
-# --- 后续阶段建档（本阶段 MUST NOT 使用）-------------------------------------
-
-#: 内置工具生成失败 —— 属 F001-P3（子段 3），本阶段不触发。
+#: 内置工具生成失败（``BuiltinToolGenerationError``）—— 本阶段启用（F001-P3）。
 EXIT_CODE_BUILTIN_TOOL_GENERATION = 4
 
 # --- 段位元组 -----------------------------------------------------------------

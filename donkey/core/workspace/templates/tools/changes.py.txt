@@ -1,0 +1,244 @@
+"""变更记录契约库 —— 工作区内所有"改文件"工具的唯一记录产地。
+
+本模块属于**材料层**（工作区），由 `donkey init` 生成，可由用户编辑或删除。
+它含 **0 个 `@tool` 函数** —— 它是一份纯标准库的辅助库，被内置工具与用户
+自写工具共同 import，使整个工作区的每一次文件变更都说**同一种**语言。
+
+为什么要有这个模块
+------------------
+donkey v1 **不**承诺差异审阅（立项书 AC-5）：差异渲染 / 人工确认 / 回滚属
+**引擎层**，随 v4（或对本仓库的 fork）到来。引擎层从材料层需要的，是每次
+变更的**原材料** —— 在**写入那一刻**就被捕获：
+
+    工具写入 -> 变更记录 -> 引擎渲染差异 -> 人工确认 -> 落盘
+
+若某个工具覆盖文件时没有记录"覆盖之前是什么"，差异的"前一半"就被销毁，
+**任何**引擎层的差异展示（与回滚）都无从建立。故本模块定下四条硬规则：
+
+1. **原子** —— 内容经临时文件 + ``os.replace`` 落位；写入失败或被中断时，
+   旧版本内容完好无损。
+2. **非破坏** —— 旧内容在**被替换之前**就被取指纹（并可按需整份带回）。
+3. **可预览** —— 差异可以在**不碰磁盘**的前提下算出来。
+4. **并发安全** —— 写入方可声明"我以为的文件指纹"，文件在此期间被别人改过
+   时不会被静默覆盖。
+
+向后兼容规则（对未来改动有约束力）
+------------------------------------
+- **只增不改**：新字段可以加；既有字段的名字与语义冻结，消费方 MUST 忽略
+  不认识的字段。
+- **名字冻结**：在给定的 ``CHANGE_RECORD_VERSION`` 下，字段名与形状稳定。
+- **版本分派**：破坏性变更才递增 ``CHANGE_RECORD_VERSION``；消费方按版本
+  分派，**不**靠"字段是否存在"猜版本。
+- **复用helper**：用户自写工具 SHOULD import 本模块，而不是自己重写一套
+  写入 / 指纹 / 差异逻辑 —— 整个工作区因此只保留一种记录格式。
+"""
+
+from __future__ import annotations
+
+import difflib
+import hashlib
+import os
+import tempfile
+from pathlib import Path
+from typing import Any
+
+#: 变更记录契约的版本号。仅在破坏性变更时递增。
+CHANGE_RECORD_VERSION = 1
+
+#: 单条差异文本（``unified_diff``）的最大字节数，超出即截断。
+MAX_DIFF_BYTES = 64 * 1024
+
+#: 按需附带旧正文（``previous_content``）时的最大字节数。
+MAX_PREVIOUS_BYTES = 256 * 1024
+
+
+class FileChangedError(RuntimeError):
+    """磁盘上的文件已不再匹配调用方声明的期望指纹。"""
+
+
+def workspace_root() -> Path:
+    """工作区根的绝对路径 —— 即"存放 ``tools/`` 的那个目录"。
+
+    推导方式恒定：契约库自身所在位置的上级目录。本函数 MUST NOT 读取任何
+    环境变量 —— 工具的行为不得被环境变量改变（相对路径的基准因此始终明确：
+    移动 ``tools/`` 即改变基准）。
+    """
+    return Path(__file__).resolve().parent.parent
+
+
+def resolve_path(path: str) -> Path:
+    """把调用方给出的路径解析为绝对路径。
+
+    绝对路径原样保留（路径白名单由用户自管）；相对路径以**工作区根**为
+    基准，绝不以进程当前目录为基准。
+    """
+    p = Path(path)
+    return p if p.is_absolute() else workspace_root() / p
+
+
+def relative_path(path: Path) -> str:
+    """``path`` 的工作区相对 POSIX 路径；工作区之外回退为绝对路径。
+
+    落在工作区之外的路径 MUST NOT 抛异常 —— 越界记录由消费方按
+    ``rel_path`` 单独标注即可。
+    """
+    root = workspace_root()
+    try:
+        return path.resolve().relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def sha256_bytes(data: bytes) -> str:
+    """``data`` 的 ``sha256:<hex>`` 指纹。"""
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def read_existing_bytes(path: Path) -> bytes | None:
+    """按**原始字节**读取 ``path``；文件不存在时返回 ``None``。
+
+    指纹 MUST 按原始字节计算 —— 先解码再编码会改变含 BOM 或含非法字节的
+    文件的指纹。
+    """
+    if not path.exists():
+        return None
+    if path.is_dir():
+        raise IsADirectoryError(f"not a file: {path}")
+    return path.read_bytes()
+
+
+def atomic_write_bytes(path: Path, data: bytes) -> None:
+    """把 ``data`` 原子地写入 ``path``。
+
+    载荷先写入**同目录**的临时文件，再用 ``os.replace`` 落位（POSIX 与
+    Windows 上均为原子替换）—— 跨目录的替换不保证原子。任一环节失败都
+    **不会**破坏原有内容，且临时文件在异常路径上 MUST 被清理。
+
+    临时文件名以点开头（``.donkey-tmp`` 结尾）—— 不污染目录列表的默认视图。
+    父目录不存在时自动创建（保持"写文件自动建父目录"的语义）。
+    """
+    if path.exists() and path.is_dir():
+        raise IsADirectoryError(f"target is a directory: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent),
+        prefix=f".{path.name}.",
+        suffix=".donkey-tmp",
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def build_unified_diff(old_text: str, new_text: str, rel: str) -> str:
+    """两个文本之间的标准统一差异，差异头用工作区相对路径。
+
+    差异头固定为 ``--- a/<rel_path>`` / ``+++ b/<rel_path>`` —— 工作区可以
+    整体搬移，差异文本必须可移植。
+    """
+    return "".join(
+        difflib.unified_diff(
+            _split_lines(old_text),
+            _split_lines(new_text),
+            fromfile=f"a/{rel}",
+            tofile=f"b/{rel}",
+        )
+    )
+
+
+def build_change_record(
+    action: str,
+    path: Path,
+    previous_bytes: bytes | None,
+    new_bytes: bytes | None,
+    *,
+    src: Path | None = None,
+    include_previous: bool = False,
+) -> dict[str, Any]:
+    """构造规范形态的变更记录。
+
+    ``previous_bytes`` / ``new_bytes`` 为 ``None`` 表示该侧不存在（新建的
+    文件 / 已删除的文件）。指纹与体积 MUST 按**原始字节**计算。调用方在
+    真正落盘之后把 ``applied`` 置真；预览模式下它保持为假。
+    """
+    previous_text = (
+        previous_bytes.decode("utf-8", errors="replace")
+        if previous_bytes is not None
+        else None
+    )
+    new_text = (
+        new_bytes.decode("utf-8", errors="replace") if new_bytes is not None else None
+    )
+    rel = relative_path(path)
+    diff = build_unified_diff(previous_text or "", new_text or "", rel)
+    diff_bytes = diff.encode("utf-8")
+    truncated = len(diff_bytes) > MAX_DIFF_BYTES
+    if truncated:
+        diff = diff_bytes[:MAX_DIFF_BYTES].decode("utf-8", errors="ignore")
+    record: dict[str, Any] = {
+        "version": CHANGE_RECORD_VERSION,
+        "action": action,
+        "path": str(path),
+        "rel_path": rel,
+        "previous_exists": previous_bytes is not None,
+        "previous_size": len(previous_bytes) if previous_bytes is not None else 0,
+        "previous_hash": (
+            sha256_bytes(previous_bytes) if previous_bytes is not None else None
+        ),
+        "new_size": len(new_bytes) if new_bytes is not None else 0,
+        "new_hash": sha256_bytes(new_bytes) if new_bytes is not None else None,
+        "unified_diff": diff,
+        "diff_truncated": truncated,
+        "applied": False,
+    }
+    if src is not None:
+        record["src"] = str(src)
+        record["src_rel_path"] = relative_path(src)
+    if include_previous and previous_bytes is not None:
+        if len(previous_bytes) <= MAX_PREVIOUS_BYTES:
+            record["previous_content"] = previous_text
+        else:
+            record["previous_content_truncated"] = True
+    return record
+
+
+def check_expected_hash(path: Path, expected_hash: str | None) -> None:
+    """断言 ``path`` 的当前指纹仍等于 ``expected_hash``（乐观锁）。
+
+    ``expected_hash`` 为 ``None`` 或空串时关闭检查。文件在此期间被他人改动
+    时抛出 :class:`FileChangedError` —— 调用方应重新读取后再重试，而不是
+    覆盖别人的改动。文件**已不存在**时（当前指纹为 ``None``）同样视为不匹配。
+    """
+    if not expected_hash:
+        return
+    current = read_existing_bytes(path)
+    actual = sha256_bytes(current) if current is not None else None
+    if actual != expected_hash:
+        raise FileChangedError(
+            f"{path} changed since it was read "
+            f"(expected {expected_hash}, found {actual}); "
+            f"re-read the file and retry"
+        )
+
+
+def _split_lines(text: str) -> list[str]:
+    """按 ``\\n`` 切行并保留行尾的换行符。
+
+    行界**只有** ``\\n`` —— MUST NOT 使用 ``str.splitlines()``（后者还会把
+    ``\\v`` / ``\\u2028`` 等当作行界，会让行号与差异文本的行号对不齐）。末尾的
+    换行符视为"结束最后一行"，而非"开启一个空行"。
+    """
+    if not text:
+        return []
+    parts = text.split("\n")
+    lines = [part + "\n" for part in parts[:-1]]
+    if parts[-1]:
+        lines.append(parts[-1])
+    return lines

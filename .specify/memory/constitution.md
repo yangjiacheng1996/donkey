@@ -101,6 +101,8 @@
 
 **显式排除**（workspace 内不出现）：
 - ❌ `agent.py` / `main.py` / 任何 Python 入口
+  > **边界（2026-10-23 澄清，见 [D-19]）**：本条的"任何 Python 入口"指**智能体入口**（能直接启动智能体的文件）；Skill **第三层附属资源目录**（`skills/<name>/scripts/` 等）下的**普通演示脚本**（如 `skills/example/scripts/example.py`）属**用户代码路径的普通脚本**，**不属**该范畴 —— 智能体的唯一官方入口仍是 `donkey.core.api.create_agent`。
+  > **授权来源（2026-10-23 正式化）**：本边界原经 §6.3 **例外 E-02** 临时授权；E-02 到期时经 Maintainer 裁决**正式纳入宪法** —— 载体即 §5 章 **[D-19]**（该条自此为正式条款，不再依赖临时例外）。E-02 转为历史登记。
 - ❌ `middleware/`（中间件属引擎侧）
 - ❌ `connectors/` / `channel/` / `schedules/` / `evals/` / `identity/` / `sandbox/`
 - ❌ `memory.py`（长期记忆文件）
@@ -365,6 +367,7 @@ AC-1 ~ AC-5 全部通过；三套官方模板 workspace（通用型 / 编程型 
 | **[D-16]** | **v1 LLM 接入零自研解析层**——26 个 provider 全部复用 LangChain 官方类（唯一抽象 = `ReusableProvider` 薄包装）；`provider_id` → LangChain 类的翻译由 **donkey facade** 完成，**禁止**把 TOML 的 `default_provider` 直接喂 `init_chat_model`；donkey 在解析层的唯一职责是**配置层严格校验**（per-provider schema + F002 load 校验，exit 11 伞形）。配置布局 = `providers/` 目录 + 一 provider 一文件 + `enabled` 开关 | `大模型toml参数设计.md` §2 / §7 / §15 |
 | **[D-17]** | **N-12 的边界澄清**——N-12 禁止的是 **donkey 自有代码路径**（`donkey.core` / `cli` / `web` / `gui`）对 LangSmith 任何形态的 **import 与使用**；第三方库的**传递依赖被安装到磁盘**不构成"使用"，但 MUST 在 plan 中显式登记影响面，且 MUST 由门禁实证"donkey 永不 import"（不设 `LANGSMITH_*` 等环境变量）。**动机**：F001-P2 引入 `langgraph-checkpoint-sqlite`（短期记忆库的历史表 / 写入表 MUST 由上游 saver 的实例 `setup()` 创建，donkey MUST NOT 手写 DDL），其传递依赖 `langchain-core` 会把 `langsmith` **安装到磁盘** —— 实测导入上游 saver 新增 471 个模块、langsmith 相关 **0** 个进入进程。若不加边界澄清，plan 将被迫对宪法 MUST 作单方面重新解释（违反 §6.1 宪法权威）。**影响面**：仅 N-12 / §3.2 的读法澄清，**不放宽任何 import 禁令**；受影响产物 = F001-P2 的 `plan.md`（G6 / 风险表 / R-02）、`quickstart.md` §4~§5 的 grep 自检、`spec.md` SC-017 | N-12 + F001-P2 Maintainer 裁决（2026-10-23） |
 | **[D-18]** | **短期记忆库的表数量口径** —— §3.1 表格原写"单文件双表"，实为 **3 张表 + 2 个索引**：`checkpoints` / `writes`（上游 `langgraph-checkpoint-sqlite` 的 `SqliteSaver` 拥有）+ `sessions_metadata`（donkey 自管，含 `idx_sessions_metadata_title` / `idx_sessions_metadata_updated_at` 两个索引）。权威结构定义见 `harness/report/sessions_sqlite表结构一览.md` §2.2 与 §7（5 项健康断言）。**本条只澄清 §3.1 表格措辞，不放宽任何约束**：F002-P2 的 `SqliteSchemaError`（exit 16）5 项断言口径不变。**同源措辞已一并同步**（原「单文件双表」在 3 处遗留，现全部改为「单文件三表两索引」）：① 本宪法 §3.1.1 首条的标签；② 立项书 §4.6.3「模板预创建」行与「`sessions.sqlite3` 单文件三表两索引设计」小节（含其「承载三张表」「三张表互不干扰」两句）；③ 宪法 §3.1 表格（本条前半段所述）。各处**表数 / 索引数 / 字段 / 断言口径逐字未动**，仅标签与「两套表 → 三张表」的计数措辞对齐 | 立项书 §5.5.3 + `sessions_sqlite表结构一览.md` §2.2 / §7 |
+| **[D-19]** | **N-01 的边界澄清 —— "Python 入口文件"指*智能体入口***：N-01 / D-10 / §2.6 / §3.2 所禁的"任何 Python 入口文件"，指**能直接启动智能体的文件**（`agent.py` / `main.py` 这类）；Skill **第三层附属资源目录**（`skills/<name>/scripts/` 等）下的**普通用户脚本**（如 `skills/example/scripts/example.py`）**不属**该范畴 —— 它是**用户代码路径**下的普通脚本，唯一用途是"被内置命令工具调用并打印一行输出"，智能体的唯一官方入口仍是 `donkey.core.api.create_agent`。**动机**：F001-P3 交付的示例 Skill 需以"第三层可执行脚本"展示"模型如何按需调用附属资源"，该脚本必须保留 `if __name__ == "__main__": sys.exit(main())` 入口块（与源提示词模板逐字一致）；若按 N-01 的字面口径禁止一切入口块，则该示例无法演示"被调用"这一语义，或必须偏离源模板正文。**影响评估**：仅 F001-P3（`specs/001-donkey-init-workspace/phase-3-builtin-tools/`）的 `spec.md` FR-050 / Edge Cases「阶段边界类」/ Phase 元信息「治理依据」行、`plan.md` 的 G14 与 Complexity Tracking、`tasks.md` 的 T016 / T046 与 T094 的持久不变量口径 —— 均为**登记与引用**层面，**不改动任何需求层语义**（入口块仍 MUST 保留）；工作区内 MUST NOT 出现 `agent.py` / `main.py` 这条**持久不变量**不变。**迁移路径**：本条经 §6.3 **例外 E-02** 临时授权；E-02 到期（见其过期时间）时须正式纳入宪法（修订本条或新增 D-xx），或移除该演示脚本的入口块 —— 两者择一，由 Maintainer 裁决。**✅ 已正式化（2026-10-23，Maintainer 裁决「正式纳入宪法」）**：E-02 到期时选**第一条**路径 —— 本条**自此即为宪法正式条款，不再依赖任何临时例外**（E-02 转为历史登记，临时授权阶段结束）；第二条路径（移除演示脚本的入口块）**未被采用**（会与 F001-P3 `spec.md` FR-050「MUST NOT 被改写成无入口块的形态」冲突）。**正式化后本条的口径一字未改**：入口块仍 MUST 保留、三条范围边界（MUST NOT 位于 `tools/` 目录 / MUST NOT 命名为 `agent.py` · `main.py` / MUST NOT 承担"创建智能体"职责）仍适用、"工作区内 MUST NOT 出现 `agent.py` / `main.py`"这条持久不变量仍成立 | 立项书 §3.4 + N-01 / D-10 的立法目的 + F001-P3 Maintainer 裁决（2026-10-23） |
 
 ---
 
@@ -403,7 +406,32 @@ AC-1 ~ AC-5 全部通过；三套官方模板 workspace（通用型 / 编程型 
 > - **过期时间**：F001-P3（`builtin_tools`）结束前 —— 最迟在该 Phase 内交付 `.github/workflows/ci.yml`，
 >   或由 Maintainer 显式决定转为正式纳入宪法。
 > - **登记位置**：F001-P1 的 `plan.md` G5 与 F001-P2 的 `plan.md` G5（判定保持「⚠️ 部分」，依据列补注本例外）；
->   `research.md` R-08（结论不变，仅记录例外已登记）；`harness/features/README.md` §4.3（登记范围扩展）。
+>   `research.md` R-08（结论不变，仅记录例外已登记）；`harness/features/README.md` §4.3（登记范围扩展）；
+>   **到期闭合登记**：`harness/features/feature001_phase003_builtin_tools.md` §6.16（F001-P3 的
+>   **CI 工作流交付断言** —— 本 Phase 采用「P3 内交付 `.github/workflows/ci.yml`」的处置，
+>   而非「转为正式纳入宪法」；该断言 MUST 与 15 个场景断言同时满足，F001-P3 方可收尾）。
+> - **✅ 到期闭合（2026-10-23 · F001-P3 内交付，Maintainer 裁决）**：本例外走的是 §6.3 第 3 条的
+>   **「完成合规修复」**路径 —— F001-P3 已交付 `.github/workflows/ci.yml`（含 `pytest tests/` +
+>   `pytest tests/unit/ --cov=donkey.core --cov-fail-under=80` + `ruff check donkey/ tests/` +
+>   `mypy donkey/ tests/` 四类命令，Python 3.11 / 3.12 矩阵，覆盖率用**独立命令**度量）。
+>   故本临时例外**随交付而终止**，**不转为正式条款**（CI 工作流本属仓库级资产，宪法无须为其设立常设条款）。
+>   闭合证据：F001-P3 的 `tests/e2e/phase/verify_phase_f001_p3.py` 场景 16（CI 交付检查断言）——
+>   该断言与 15 个功能场景断言**同时**满足，F001-P3 方可收尾。
+>
+> **例外 E-02（2026-10-23，Maintainer 批准；2026-10-23 到期正式纳入宪法，Maintainer 裁决）**：F001-P3（`builtin_tools` Phase）交付的示例 Skill **第三层附属资源目录**下的**普通演示脚本**（如 `skills/example/scripts/example.py`）**不属** N-01 / D-10 / §2.6 / §3.2 所禁的"Python 入口文件"。
+> - **范围**：仅限 **Skill 第三层附属资源目录**（`skills/<name>/scripts/` 等）下的**普通脚本**；该脚本 MUST NOT 位于 `tools/` 目录（否则会被工具扫描器当作工具模块）、MUST NOT 命名为 `agent.py` / `main.py`、MUST NOT 承担"创建智能体"职责（智能体的唯一官方入口仍是 `donkey.core.api.create_agent`）。
+> - **理由**：N-01 的立法目的是"禁止工作区出现**智能体入口**，避免用户误以为可直接运行工作区里的 Python 文件来启动智能体"；Skill 第三层的演示脚本是**用户代码路径的普通脚本**，唯一用途是"被内置命令工具调用并打印一行输出"，与智能体入口无关（边界澄清见 §5 章 [D-19]）。
+> - **替代保障**：① 该脚本 MUST 仅演示"被调用后打印一行输出"这一最小行为；② 工作区内 MUST NOT 出现 `agent.py` / `main.py` 这条**持久不变量**不变（F001-P2 的既有断言 MUST 保留）；③ 智能体入口的唯一性不变。
+> - **过期时间**：F001-P3（`builtin_tools`）结束前 —— 最迟在该 Phase 内**正式纳入宪法**（修订 §5 章 [D-19] 或新增 D-xx），或移除该演示脚本的入口块；二者择一，由 Maintainer 裁决。
+> - **登记位置**：§5 章 [D-19]；F001-P3 的 `spec.md` FR-050（**强制引用**本例外，MUST NOT 自设豁免）、`plan.md` G14 + Complexity Tracking、`tasks.md` T016 / T046。
+> - **✅ 到期处置（2026-10-23，Maintainer 裁决「正式纳入宪法」）**：本例外选**第一条**路径 —— 其口径
+>   **正式纳入宪法**，载体为 §5 章 **[D-19]**（该条的「迁移路径」段已相应改为正式化记录）。
+>   故 **E-02 作为"临时授权"不再生效**；本条目转为**历史登记**保留在 §6.3，以维持 F001-P3
+>   已冻结文档（`spec.md` FR-050 / `plan.md` G14 / `tasks.md` T016 · T046）中对"宪法 §6.3 例外 E-02
+>   + §5 章 [D-19]"的引用**不悬空**。**第二条路径（移除演示脚本的入口块）未被采用** ——
+>   它会与 F001-P3 `spec.md` FR-050「MUST NOT 被改写成无入口块的形态」直接冲突。
+>   **工作区内的可观测行为不变**：入口块仍保留、仍受 D-19 的三条范围边界约束、
+>   "工作区内 MUST NOT 出现 `agent.py` / `main.py`"这条持久不变量不变。
 
 ---
 

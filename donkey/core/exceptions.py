@@ -6,7 +6,8 @@ Exception
     └── WorkspaceInitError          # F001 基类
         ├── PathNotFoundError       # exit 1：路径 / 输入不合法
         ├── PathPermissionError     # exit 2：权限不足
-        └── TemplateGenerationError # exit 3：模板骨架生成失败
+        ├── TemplateGenerationError # exit 3：模板骨架生成失败
+        └── BuiltinToolGenerationError # exit 4：内置工具生成失败
 ```
 
 每个异常类 MUST 在其说明中标注对应的退出码，便于客户端做退出码映射
@@ -26,6 +27,17 @@ Exception
 _NEXT_STEP_TEMPLATE = (
     "下一步：请重装 donkey（模板清单或模板源缺失），或检查目标目录的写权限后重试 init。"
 )
+
+#: 内置工具生成失败统一的"下一步"提示（spec FR-075 / SC-016）。
+#:
+#: 与 ``_NEXT_STEP_TEMPLATE`` **并列** —— 二者面向的失败阶段不同：模板类提示
+#: 的是"清单或模板源缺失"，内置工具类提示的是"生成过程失败"（磁盘满 / 权限
+#: 被撤销 / 其它 IO 错误）。
+#:
+#: MUST 与 ``BuiltinToolGenerationError`` **同模块** —— 否则 ``init.py`` 需要
+#: 反向引用文案常量，形成 ``manifest.py → init.py → manifest.py`` 的循环
+#: import（P2 的 R-12 教训）。
+_NEXT_STEP_BUILTIN = "下一步：请重装 donkey，或检查目标目录的写权限后重试 init。"
 
 
 class DonkeyError(Exception):
@@ -80,3 +92,33 @@ class TemplateGenerationError(WorkspaceInitError):
     修复后重试 ``init``。错误信息 MUST 同时含可识别的失败标识与一条可执行
     的下一步（spec FR-069 / SC-020）—— 固定文案见 ``_NEXT_STEP_TEMPLATE``。
     """
+
+
+class BuiltinToolGenerationError(WorkspaceInitError):
+    """内置工具生成失败。
+
+    退出码：``4``（``EXIT_CODE_BUILTIN_TOOL_GENERATION``）。
+
+    失败成因的**权威分类法**见
+    [contracts/exit-codes.md](../../specs/001-donkey-init-workspace/phase-3-builtin-tools/contracts/exit-codes.md)
+    §3 的两类成因表（3 个内置工具文件写入失败 / 示例 Skill 三层写入失败）。
+    本类 MUST NOT 自行复述该表 —— 避免出现第 2 份副本而漂移。
+
+    用户修复动作：重装 donkey / 检查目标目录写权限 / 修复后重试 ``init``。
+    错误信息 MUST 同时含可识别的失败标识与一条可执行的下一步（spec FR-075 /
+    SC-016）—— 固定文案见 ``_NEXT_STEP_BUILTIN``。
+
+    本类 MUST NOT 自行返回退出码 / 打印 / 退出进程（宪法 N-05）。
+    """
+
+    def __init__(self, message: str = "") -> None:
+        """确保错误信息恒含一条用户可执行的下一步（spec FR-075 / SC-016）。
+
+        下一步文案由本模块的 ``_NEXT_STEP_BUILTIN`` 单点定义 —— 构造时若
+        调用方未自带该文案则补齐，使"错误信息 MUST 含一条下一步"这条契约
+        对**任何**抛出点都成立，而不必依赖每个抛出点各自记得拼接。
+        """
+        text = str(message)
+        if _NEXT_STEP_BUILTIN not in text:
+            text = f"{text} {_NEXT_STEP_BUILTIN}".strip()
+        super().__init__(text)

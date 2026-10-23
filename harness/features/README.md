@@ -158,13 +158,13 @@ class BuiltinToolGenerationError(WorkspaceInitError):
 | F001 | 子段 1（= Phase P1）| `PathNotFoundError` | 1 | PATH 父目录不存在 / 路径解析失败（如相对路径、非法字符） | 高 |
 | F001 | 子段 1（= Phase P1）| `PathPermissionError` | 2 | PATH 权限不足（父目录和 workspace 缺失读 / 写 / 执行权限） | 高 |
 | F001 | 子段 2（= Phase P2）| `TemplateGenerationError` | 3 | 模板骨架生成失败（合并四项：源缺失 / 渲染失败 / 文件写入失败 / sqlite3 schema 构造失败；用户修复动作相同） | 低 |
-| F001 | 子段 3（= Phase P3）| `BuiltinToolGenerationError` | 4 | 内置 `@tool` + Skills example 生成失败（合并三项：filesystem/commandline/webfetch 写入失败、SKILL.md 三层写入失败、端到端集成预演失败） | 低 |
+| F001 | 子段 3（= Phase P3）| `BuiltinToolGenerationError` | 4 | 内置 `@tool` + Skills example 生成失败（合并两项：filesystem/commandline/webfetch 写入失败、SKILL.md 三层写入失败） | 低 |
 | F001 | 子段预留 | （预留） | 5-10 | 留给 v1.x 试运行期发现的新错误 | — |
 
 > **设计说明**：
 > 1. F001 的职责是"存活检查"——只管"能不能生成文件"，不管"生成的文件格式是否合法"。文件格式的合法性属于 F002 静态检查范畴（exit 11-14）。
 > 2. `donkey init` 是**幂等**的（详见 §4.1.1 四场景说明）：已存在 workspace + 无 `--force` 不是错误。
-> 3. `BuiltinToolGenerationError`（exit 4）覆盖内置工具写入失败 / SKILL.md 三层写入失败 / 集成预演 import 失败三项——三者对用户的修复动作相同（重装 donkey / 检查权限 / 重试 init），按奥卡姆剃刀合并为单一 exit code。
+> 3. `BuiltinToolGenerationError`（exit 4）覆盖内置工具写入失败 / SKILL.md 三层写入失败**两项**——二者的修复动作相同（重装 donkey / 检查权限 / 重试 init），按奥卡姆剃刀合并为单一 exit code。**（2026-10-23 澄清：源提示词的第三类成因"集成预演 import 失败"在本 Phase 不成立 —— `donkey init` 阶段不做导入预演，导入验证归 F002 `donkey load`；见 F001-P3 spec FR-072。）**
 > 4. **退出码实际使用连号**（1-4），预留码（5-10）放末尾；不强求段位按 N-N-N 等分。
 >
 > **v1 不引入 Path basename 命名校验**（立项书 §4.6.4 注脚）：当前决定**不**强制 workspace 路径 basename 满足 Python 标识符命名规则；用户在 v1 可使用任意目录名（含 `-` / `.` / 空格 / Unicode 等）。如果 v2 引入 workspace-as-package 需求，再补规则——避免为不存在的 v2 假想场景写代码。
@@ -511,6 +511,7 @@ templates/
 - 不解析 `providers/` 下的任何 TOML（属于 F002 load 域）；
 - **不**交付 `.github/workflows/ci.yml`（C1 工作流文件 Deferred——属仓库级资产，非单 Phase 交付物；已按宪法 §6.3 登记临时例外 E-01，替代保障为 plan G5 记录的 CI 最小内容骨架 + 本地命令清单作为完成证据，最迟于 F001-P3 结束前交付）。
   > **E-01 范围扩展（2026-10-23，Maintainer 批准）**：原登记范围「仅 F001-P1」→ 扩展为「**仅 F001-P1 与 F001-P2**」（F001-P2 引入第一个运行期依赖与 14 个黑盒验收场景，测试面进一步扩大，CI 文件仍属仓库级资产）。本次扩展**不改变**过期时间（F001-P3 结束前）、**不改变**替代保障清单、**不新增**任何豁免条款。权威文本见宪法 §6.3 E-01。
+  > **✅ E-01 到期闭合（2026-10-23 · F001-P3 内交付）**：例外走宪法 §6.3 第 3 条的**「完成合规修复」**路径 —— F001-P3 已交付 `.github/workflows/ci.yml`，临时例外**随交付终止**、不转为正式条款。闭合证据 = F001-P3 e2e 场景 16（CI 交付检查断言，与 15 个功能场景断言同时满足）。
 
 ---
 
@@ -609,16 +610,22 @@ templates/
 - **`tools/__init__.py`**：空文件或最小初始化（保证 `from tools import filesystem` 可用）。
 - **`tools/changes.py`**：**变更记录契约库**（**0 个 `@tool`**，纯 stdlib）——原子写 + sha256 + unified diff + 乐观锁的**唯一产地**；所有改文件的工具（含用户自写工具）都 import 它，产出**统一 schema** 的"变更记录"（`CHANGE_RECORD_VERSION = 1`）。**这是 v4"diff 展示"（立项书 §1.5.3）的接入面**：材料层交出变更原材料，引擎层负责渲染 diff / 人工确认 / 回滚（v1 不承诺 diff 审阅，AC-5）。详见 F001-P3 §2.9。
 - **`tools/filesystem.py`**：7 个 `@tool`（**立项书 §4.6.1 + 调研 §三**）：
-  - `read_file(path, start_line=1, num_lines=None) -> str` / `write_file(path, content, dry_run=False, include_previous=False, expected_hash=None)` / `copy_file(src, dst)` / `move_file(src, dst)` / `delete_file(path, include_previous=False)` / `list_dir(path, include_hidden=True) -> list[str]` / `stat(path, with_hash=False) -> dict`；
+  - `read_file(path, start_line=1, num_lines=None) -> str` / `write_file(path, content, dry_run=False, include_previous=False, expected_hash=None)` / `copy_file(src, dst, dry_run=False, expected_hash=None)` / `move_file(src, dst, dry_run=False, expected_hash=None)` / `delete_file(path, include_previous=False, dry_run=False, expected_hash=None)` / `list_dir(path, include_hidden=True, offset=0, limit=None) -> list[str]` / `stat(path, with_hash=False) -> dict`；
   - 实现：`pathlib` / `shutil`；路径白名单由用户自管（donkey 不强制）；
+  - 读取侧（2026-10-23 澄清，与 OpenCode 对齐）：**双上限** 2000 行 / 50 KiB（先到者生效）+ 单行 2000 字符截断留痕 + 续读指针；返回**呈现文本**（页范围头 + `<行号>: ` 前缀），二进制 / 图片 / PDF 明确报错；`list_dir` 分页参数 `offset`（0 基）/ `limit`（≤ 2000）；
   - **写类工具一律返回 `change` 变更记录**（`action` / `previous_hash` / `new_hash` / `unified_diff` / `applied`）+ **原子写**（同目录临时文件 + `os.replace`）；新增参数**全部可选且带默认值**（旧调用方式逐字节不变 = 向后兼容）；
   - **不**含 `glob_search` / `grep_search`（由 `FilesystemFileSearchMiddleware` 接管，**宪法 §2.5**）。
 - **`tools/commandline.py`**：1 个 `@tool`：
   - `run_shell(command, timeout=60, cwd=None) -> str`（`cwd` 默认 = workspace 根，不依赖进程 cwd）；
+  - 返回字段 = `stdout` / `stderr` / `returncode` / `timed_out` / `cwd` / `argv` / `truncated`；输出超 **2000 行 / 50 KiB** MUST 截断并置 `truncated=true`（完整输出**不落盘**）；超时以 `timed_out=true` + `returncode=-1` **返回**（不抛异常）；
   - 实现：`subprocess.run([...], shell=False, timeout=...)`，每次新进程，**不**走持久 shell（避免 HITL 冲突）。
 - **`tools/webfetch.py`**：1 个 `@tool`：
   - `fetch_url(url, method="GET", headers=None, timeout=30) -> str`；
-  - 实现：`httpx` / `requests` 同步 + 显式 timeout；不持久化 cookies。
+  - 实现：`httpx` / `requests` 同步 + 显式 timeout；不持久化 cookies；**MUST 用流式读取**（`httpx.Client` + `client.stream(...)`）—— 一次性读取无法"读取中守上限"；
+  - **四道边界**（命中即报错，MUST NOT 放行）：**协议白名单**（仅 `http` / `https`）/ **响应体上限 5 MiB**（先看 `Content-Length`，再在读取过程中守住）/ **非文本 MIME 拒绝**（只接受 `text/*` + `application/json` · `application/xml` · `application/xhtml+xml`）/ **非 2xx 报错**（MUST NOT 返回正文）；
+  - **不限制地址范围** —— MUST NOT 实现任何地址黑名单 / 白名单 / 代理 / 沙箱（回环地址、私有网段一律放行）；
+  - 超时值**上限 120 秒**（超过即在发请求前报错）；**客户端 MUST 以 `trust_env=False` 构造**（httpx 默认 `trust_env=True` 会隐式读取代理 / 证书环境变量，违反"工具 MUST NOT 读任何环境变量"）；
+  - 网络异常（超时 / 网络 / 协议）**透传**给调用方 —— 与 `run_shell` 的"超时返回标记"构成**有意的不对称**。
 - **`tools/README.md`**：工具开发规范（命名、参数、错误处理、timeout）。
 - **`skills/example/SKILL.md`**：完整三层示例（**宪法 §2.4**）：
   - Level 1：frontmatter `name` + `description`；
@@ -627,25 +634,31 @@ templates/
 - `core/workspace/templates/manifest.json` **追加**：把上述 8 条新 entry（tools/__init__.py + **`tools/changes.py`（变更记录契约库）** + 3 个内置 tool + 3 个 Skills Level 3 示例）加入模板清单（P2 已有 instruction.md / `providers/` 等基础模板 + sqlite3 模板；P3 追加 builtin 模板条目）；
 - `core/workspace/init.py`：**不重复实现** `render_templates`——P2 实现的 `render_templates` 已遍历 manifest.json **全量条目**实现幂等 + `--force`；本 Phase 仅**追加** manifest 条目，运行期 `donkey init` 调用 `render_templates` 时会自动覆盖本 Phase 加入的 builtin 工具条目。具体行为：
   - 不传 `force`：仅当文件不存在时创建；已存在跳过（用户自定义 `tools/*.py` 不在清单内，不动）；
-  - 传 `force`：先 `delete` 再 `create`；sqlite3 模板也会被重建（见 §4.4 P2 实现要点 + §4.1.1 "memory/ 模板边界"）。
+  - 传 `force`：先 `delete` 再 `create`；sqlite3 模板也会被重建（见 §4.4 P2 实现要点 + §4.1.1 "memory/ 模板边界"）；
+  - **★ 唯一一处通则例外（契约库豁免，2026-10-23 澄清轮）**：`--force` 时若工作区中**已存在** `tools/changes.py`（变更记录契约库），MUST **保留其原样**（不覆盖、不删后重建）—— 契约库与用户自写工具**是一套的**（用户工具 import 它），覆盖它等于单方面毁掉用户代码的依赖。该豁免 MUST 只作用于契约库**一个**条目，MUST NOT 削弱 P2 通则对其余全部条目的成立。**实现落点** = `init_workspace_inner` 步骤 ④ 的编排层（把该条目从传给 `render_templates` 的列表中剔除并计入 `files_skipped`），`render_templates` 本身**一字不改**。**计数后果**：带强制标志且契约库已存在时 `templates=54 / created=47 / skipped=1`（其余情形仍为 `54/48/0` 与 `54/0/48`）。
 - **端到端集成预演**（**注意：仅做"import 路径 + 函数签名"测试，不做 F002 静态格式检查**）：`tests/integration/test_init_to_load.py` 验证 init 完的 workspace 能被 Python import 路径正确发现 `@tool` 函数。
 
 **异常退出码**（详见 §3.1 表）：
-- exit 4 = `BuiltinToolGenerationError` —— 内置 `@tool` + Skills example 生成失败（合并三项：filesystem/commandline/webfetch 写入失败、SKILL.md 三层写入失败、集成预演 import 失败）。
+- exit 4 = `BuiltinToolGenerationError` —— 内置 `@tool` + Skills example 生成失败（合并**两项**：filesystem/commandline/webfetch 写入失败、SKILL.md 三层写入失败）。
 
 **退出条件**：
 - `verify_phase_f001_p3.py` 通过以下断言：
   1. 生成的 workspace 包含 `tools/filesystem.py` / `tools/commandline.py` / `tools/webfetch.py` / `tools/__init__.py` / `tools/README.md`；
   2. 三个 builtin tool 文件均可 import，每个 `@tool` 函数有完整 docstring；
-  3. `commandline.py` 执行 `run_shell("echo hello")` 返回 **JSON 字符串**（`{"stdout": "hello\n", "stderr": "", "returncode": 0, "timed_out": false}`）——`stdout` 字段含 `"hello\n"`（集成测试）；
+  3. `commandline.py` 执行 `run_shell("echo hello")` 返回 **JSON 字符串**（`{"stdout": "hello\n", "stderr": "", "returncode": 0, "timed_out": false, "cwd": "...", "argv": ["echo", "hello"], "truncated": false}`）——`stdout` 字段含 `"hello\n"`（集成测试）；
   4. `filesystem.py` 7 个 `@tool` 单元测试全绿；
-  5. `webfetch.py` HTTP mock（`httpx.MockTransport`）GET/POST 测试通过；
+  5. `webfetch.py` HTTP mock 测试通过（**实现口径 = `pytest-httpx` 的 `httpx_mock` fixture**：进程内单元测试用它拦截；e2e / 集成层因拦截只对当前进程生效，MUST 在**子进程内**打桩 `httpx.Client.send` 后再导入调用 —— **不是** `httpx.MockTransport`；方法覆盖 GET，POST 等方法沿用同一客户端路径，**未**单独出 POST 用例）；
   6. `skills/example/SKILL.md` frontmatter 合法 + Level 2 非空 + Level 3 含至少 1 个文件；
   7. `tools/` 子目录内的 3 个内置工具**不**含 `glob_search` / `grep_search`；
   8. **幂等场景 2**：用户 `rm /tmp/ws/tools/filesystem.py` 后 `donkey init /tmp/ws` → exit 0；该文件被补齐；
   9. **`--force` 场景 3**：用户自建 `tools/my_custom_tool.py`（不在清单内）后 `donkey init /tmp/ws --force` → exit 0；`filesystem.py` 被覆盖（恢复出厂内容），但 `my_custom_tool.py` **仍在**；
   10. 集成预演：`from tools.filesystem import read_file` 等 import 语句无异常；
-  11. **不**做"init 后跑 F002 静态检查"——F002-P1 才会做（exit 11-14）。
+  11. **不**做"init 后跑 F002 静态检查"——F002-P1 才会做（exit 11-14）；
+  12. **CI 工作流文件已交付**：`.github/workflows/ci.yml` MUST 在本 Phase 内交付
+      （**宪法 §6.3 临时例外 E-01 到期**——原范围「仅 F001-P1 与 F001-P2 均不交付」的
+      过期时间是「F001-P3 结束前」；本 Phase 采用「P3 内交付」而非「转为正式条款」）。
+      最小内容 = plan G5 的 CI 骨架：`pytest tests/` + `pytest tests/unit/ --cov=donkey.core
+      --cov-fail-under=80` + `ruff check donkey/ tests/` + `mypy donkey/ tests/`。
 
 **绝对不做**：
 - 不挂载任何 LangChain 中间件（属于 F004 run 域）；
@@ -653,6 +666,32 @@ templates/
 - 不创建 sqlite3 数据库文件——`memory/*.sqlite3` 由 F001-P2 阶段作为模板预创建（含 schema builder），本 Phase 入口条件已假定 sqlite3 模板已就绪；不重复；
 - **不**做"init 后跑 F002 静态检查"——F002 静态格式检查属 F002 域；
 - 不引入 `ShellToolMiddleware` / `FilesystemMiddleware` 等任何 LangChain 中间件（属于 F004 run 域；宪法 §2.7.2 禁用清单 / §2.7.1 录用清单）。
+
+**落地状态（2026-10-23 · F001-P3 已交付）**：
+
+| 项 | 落点 | 状态 |
+|---|---|---|
+| 清单追加 | `core/workspace/templates/manifest.json` → **54 条**（P2 的 46 条 + 本 Phase 追加 8 条：5 个 `tools/` + 3 个 Skills Level 3）；文件型 **48** 条；磁盘落地 **49** 文件 / **10** 目录 | ✅ |
+| 契约库 | `templates/tools/changes.py.txt` → 渲染出 `<workspace>/tools/changes.py`（**0 个 `@tool`**、**纯 stdlib**、零框架导入）：3 个冻结常量（`CHANGE_RECORD_VERSION=1` / `MAX_DIFF_BYTES=64KiB` / `MAX_PREVIOUS_BYTES=256KiB`）+ `FileChangedError` + **9 个公开函数**；变更记录 = **12 基线字段 + 4 条件字段**（只增不改，消费方按 `version` 分派） | ✅ |
+| 内置工具（文件） | `templates/tools/filesystem.py.txt` → **7 个 `@tool`**（`read_file` / `write_file` / `copy_file` / `move_file` / `delete_file` / `list_dir` / `stat`）；读取侧**呈现文本**（页范围头 + `<行号>: ` 前缀 + 续读指针）与**双上限**（2000 行 / 50 KiB，先到者生效，**行数上限无条件生效**）+ 单行 2000 字符截断留痕；二进制 / 图片 / PDF 明确报错；**不**含 `glob_search` / `grep_search` | ✅ |
+| 内置工具（命令） | `templates/tools/commandline.py.txt` → **1 个 `@tool`**（`run_shell`）：每次新建进程、`shlex.split` + `shell=False`（不经命令解释器）、`cwd` 默认工作区根；超时以 `timed_out=true` + `returncode=-1` **返回**（不抛异常）；输出超限截断并置 `truncated=true`（**完整输出不落盘**）；`timeout` **无上限** | ✅ |
+| 内置工具（网络） | `templates/tools/webfetch.py.txt` → **1 个 `@tool`**（`fetch_url`）：流式读取（`client.stream(...)`）+ **`trust_env=False`**；**四道边界**（协议白名单 / 5 MiB 上限 / 非文本 MIME 拒绝 / 非 2xx 报错）；**不限制地址范围**；超时上限 120 秒；网络异常透传 | ✅ |
+| 支撑文件 | `templates/tools/__init__.py.txt`（仅 docstring，**0 个工具函数**）+ **覆盖** `templates/tools/README.md.txt`（8 项规范要点 + "改文件的工具怎么写（变更记录契约）"小节 + "契约库是契约库、不是工具"声明） | ✅ |
+| Skills 三层 | **覆盖** `templates/skills/example/SKILL.md.txt`（frontmatter 恰 `name` + `description`；Level 2 讲清三层模型 + 以**工作区根**为基准的第三层使用指引）+ 新增 3 个 Level 3 源（`reference/example.md` / `scripts/example.py` / `templates/example.md`） | ✅ |
+| 强制重置豁免 | `core/workspace/init.py` → `init_workspace_inner` 步骤 ④ 的**条目级豁免**（契约库保留原样 + 计入 `files_skipped`）；`render_templates` **一字不改** | ✅ |
+| 错误类 | `core/exceptions.py` → `BuiltinToolGenerationError(WorkspaceInitError)` + `_NEXT_STEP_BUILTIN`（错误信息恒含一条可执行的下一步） | ✅ |
+| 退出码 | `core/exit_codes.py` → `EXIT_CODE_BUILTIN_TOOL_GENERATION = 4` **本阶段启用**（常量值未动，P1 建档）；`5-10` 仍不触发 | ✅ |
+| 客户端映射 | `cli/cli_client.py` → `_EXCEPTION_TO_EXIT_CODE` 追加 `BuiltinToolGenerationError: 4`（**客户端改动仅此 1 行** —— 不新增输出 / 不改摘要 / 不改 `--help` 文案） | ✅ |
+| 单元测试 | `tests/unit/test_builtin_tools.py`（**57** 个用例，覆盖 FR-058 的 **23** 个类别 + 4 个补齐类别 + 边界护栏；含共享夹具与 `compile()` 语法自检） | ✅ |
+| 集成测试 | `tests/integration/test_init_to_load.py`（**4** 个用例；**独立子进程**导入，规避 `sys.modules` 按名缓存导致的验收假绿） | ✅ |
+| 黑盒验收 | `tests/e2e/phase/verify_phase_f001_p3.py`（**16** 个 `test_scenario_*` 断言 —— 15 功能场景 + 1 CI 交付检查，全绿） | ✅ |
+| 前置套件 | P1 的 7 个 + P2 的 14 个 e2e 断言与两个既有单测文件**仍全绿**；P2 的 **12** 处阶段边界断言已按"逐行核对"口径改写为 P3 口径（54 / 48 / 49 / 10、退出码集合 `{0,1,2,3,4}` 等），**持久不变量未削弱** | ✅ |
+| 静态检查 | `ruff check donkey/ tests/` + `mypy donkey/ tests/` → 零 error | ✅ |
+| 覆盖率 | `pytest tests/unit/ --cov=donkey.core --cov-fail-under=80` → `donkey.core` 行覆盖率 **92.79%**（模板正文为 `.txt`，不在覆盖率口径内，由 `compile()` 自检兜底） | ✅ |
+| 打包核对 | wheel + sdist 产物内 **45/45** 个文本型模板源齐备（含本 Phase 新增的 8 个）；`package-data` 未改动 | ✅ |
+| CI 工作流 | `.github/workflows/ci.yml` → **已交付**（宪法 §6.3 例外 E-01 **到期闭合**） | ✅ |
+
+**本阶段实际使用的退出码**（SC-010）：`{0, 1, 2, 3, 4}` —— `1` = 输入 / 路径 / 参数用法不合法；`2` = 权限不足；`3` = 模板骨架生成失败；`4` = 内置工具 / Skills example 生成失败。
 
 ---
 
@@ -919,14 +958,17 @@ tests/e2e/phase/verify_phase_f<XXX>_p<Y>.py
 
 - `verify_phase_<f>_<n>.py` 与提示词文件 1:1 对应（v1 baseline 27 = 27）；
 - pytest 风格，**黑盒测试**：只跑 `subprocess.run(["donkey", "init", ...])` 验证 exit code 与文件系统副作用，**不** import `donkey.*` 业务代码；
-- CI 集成：`.github/workflows/ci.yml` 跑 `pytest tests/` 一键触发（**文件待建**——仓库当前尚无 .github/ 与 tests/ 目录）；Maintainer 评审单个 Phase 时 `pytest tests/e2e/phase/verify_phase_<f>_<n>.py` 单独跑；
+- CI 集成：`.github/workflows/ci.yml` 跑 `pytest tests/` 一键触发（**已交付**——F001-P3 内交付，宪法 §6.3 例外 E-01 **到期闭合**；文件含 `pytest tests/` + `pytest tests/unit/ --cov=donkey.core --cov-fail-under=80` + `ruff check donkey/ tests/` + `mypy donkey/ tests/` 四类命令，Python 3.11 / 3.12 矩阵）；Maintainer 评审单个 Phase 时 `pytest tests/e2e/phase/verify_phase_<f>_<n>.py` 单独跑；
+  > **触发方式（2026-10-23，Maintainer 决定）**：本工作流**仅手动触发**（`workflow_dispatch`），**不在 push / PR 上自动运行** —— 本地命令清单已足够作为单个 Phase 的完成证据，自动触发会持续消耗 Actions 配额。**文件本身 MUST 保留**（FR-065 + e2e 场景 16 的 CI 交付检查断言其存在与四类命令）；触发条件可随时改回（加回 `push:` / `pull_request:`）。
 - 例：`tests/e2e/phase/verify_phase_f001_p1.py` ↔ `feature001_phase001_cli_validation.md`。
 
 ### §12.2 提示词文件 ↔ Phase 映射表（v1 启动期 baseline）
 
 > **当前粒度**：1 Phase = 1 提示词文件（27 Phase = 27 文件）；如未来某 Phase 工作量超出 1 次 `/speckit.specify` 闭环（如 F004-P6 middleware 10 错误 + 10 中间件），需 Maintainer 显式决策拆 / 合（**不**自动推断；如拆：1 Phase 拆为 2 文件，文件名按"phase 编号 + 后缀"，如 `feature004_phase006_middleware_register.md` / `_runtime.md`）。
 >
-> **落地状态（v1 启动期）**：上表 27 个提示词文件中，**已完成 1 个**（F001-P1）+ **已就绪 2 个**（F001-P2 / F001-P3）——`harness/features/feature001_phase001_cli_validation.md` / `feature001_phase002_template_skeleton.md` / `feature001_phase003_builtin_tools.md`；**其余 24 个待创建**（F002~F006），按上表"准入条件"列逐个解锁。
+> **落地状态（v1 启动期 · 2026-10-23 更新）**：上表 27 个提示词文件中，**F001 的 3 个全部就绪**（F001-P1 / F001-P2 / F001-P3）——`harness/features/feature001_phase001_cli_validation.md` / `feature001_phase002_template_skeleton.md` / `feature001_phase003_builtin_tools.md`；**其余 24 个待创建**（F002~F006），按上表"准入条件"列逐个解锁。
+>
+> **实施状态（2026-10-23 · F001 整体交付）**：**F001 `donkey init` 的 3 个 Phase 已全部 TDD 实施完毕并通过验收** —— F001-P1（exit 1-2，61 项任务 / 7 个 e2e 断言）+ F001-P2（exit 3，91 项任务 / 14 个 e2e 断言）+ F001-P3（exit 4，108 项任务 / 16 个 e2e 断言）。F001 域 exit code **实装 4 码**（1 `PathNotFoundError` / 2 `PathPermissionError` / 3 `TemplateGenerationError` / 4 `BuiltinToolGenerationError`），`5-10` 按 §5.5.1 预留。**下一解锁对象 = F002-P1**（准入条件"F001 3 Phase 全退出"已满足）。逐 Phase 落地明细见 §4.4（F001-P2）与 §4.5（F001-P3）的「落地状态」表。
 >
 > **准入条件缩写**："F001-P1 退出条件" = §4.3 "退出条件" 全部跑出 PASS；"无前置" = 仓库初始化即可启动。
 >
@@ -938,7 +980,7 @@ tests/e2e/phase/verify_phase_f<XXX>_p<Y>.py
 |---|---|---|---|---|---|---|---|
 | 1 | `feature001_phase001_cli_validation.md` | F001-P1 | `1-2` | 1, 2 | 无前置 | `verify_phase_f001_p1.py` | 低（7 断言） |
 | 2 | `feature001_phase002_template_skeleton.md` | F001-P2 | `3` | 3 | F001-P1 退出条件 | `verify_phase_f001_p2.py` | 中（14 断言） |
-| 3 | `feature001_phase003_builtin_tools.md` | F001-P3 | `4` | 4 | F001-P2 退出条件 | `verify_phase_f001_p3.py` | 中（11 断言） |
+| 3 | `feature001_phase003_builtin_tools.md` | F001-P3 | `4` | 4 | F001-P2 退出条件 | `verify_phase_f001_p3.py` | 中（**16 断言** —— 15 功能场景 + 1 CI 交付检查；原提示词 §6 的"15 个场景"口径已按 §4.5 退出条件第 12 条校正为 16） |
 | 4 | `feature002_phase001_static_format.md` | F002-P1 | `11-13` | 11, 12, 13 | F001 3 Phase 全退出 | `verify_phase_f002_p1.py` | 中 |
 | 5 | `feature002_phase002_static_dynamic_basic.md` | F002-P2 | `14-16` | 14, 15, 16 | F002-P1 退出条件 | `verify_phase_f002_p2.py` | 中 |
 | 6 | `feature002_phase003_dynamic_runtime.md` | F002-P3 | `17-20` | 17, 18, 19 | F002-P2 退出条件 | `verify_phase_f002_p3.py` | 中 |

@@ -1,18 +1,38 @@
 ---
 name: example
-description: 示例 Skill —— 演示 Skills 的三层渐进披露模型，可作为自用 Skill 的起点。
+description: 示例 Skill —— 演示 Skills 的三层渐进披露模型（Level 1 头部元信息 + Level 2 正文主体 + Level 3 附属资源），可作为自用 Skill 的起点。
 ---
 
-# example
+# Example Skill（Level 2）
 
-## 第二层：正文主体（Level 2）
+本文件由 `donkey init` 自动生成，演示 Skills 的三层渐进披露模型。
 
-正文主体说明这个 Skill 解决什么问题、什么时候该用它、产出是什么。当前只给出占位级的结构说明。
+## 三层模型
 
-> 完整第二层正文由 F001-P3 覆盖写入。
+- **Level 1 —— 头部元信息**：本文件顶部的 frontmatter 块，**恰含** `name` 与 `description`
+  两个字段。donkey 会把它注册为一个**独立的工具** —— 模型调用那个第一层工具时，
+  返回的就是下面这份正文主体。
+- **Level 2 —— 正文主体**：frontmatter 下方的 Markdown 主体（本节起）。它说明这个技能解决
+  什么问题、什么时候该用它、产出是什么。
+- **Level 3 —— 附属资源**：与本文件同目录、但**不在** `SKILL.md` 里的文件，放在
+  `reference/` / `scripts/` / `templates/` 子目录中。它们由内置工具
+  （filesystem / commandline / webfetch）或引擎侧的检索中间件**按需读取** ——
+  模型不会主动加载它们。
 
-## 第三层：附属资源（Level 3）
+## 怎么按需使用第三层
 
-按需加载的附加资源放在 `reference/` / `scripts/` / `templates/` 子目录中，主文件只给出索引。
+下面三条路径都**以工作区根为基准**（与命令工具的工作目录基准一致），照抄即可：
 
-> 第三层示例由 F001-P3 覆盖写入。
+| 要做的事 | 路径（相对工作区根） | 用哪个工具 |
+| --- | --- | --- |
+| 读参考文档 | `skills/example/reference/example.md` | 文件工具的读取动作 |
+| 跑演示脚本 | `skills/example/scripts/example.py` | 命令工具的执行动作 |
+| 取模板文件 | `skills/example/templates/example.md` | 文件工具的读取动作 |
+
+> 第三层的资源**不会**被自动塞进上下文 —— 模型判断相关时，才去读它需要的那一份。
+
+## 注意事项
+
+- 修改本 Skill 时请**保留头部元信息**（frontmatter 里的 `name` 与 `description`）。
+- frontmatter 里的**其它自定义字段不被解析**，会被忽略 —— 写了不起作用。
+- 本文件属材料层内容，可随意编辑或删除；删掉它不影响工作区的其它能力。

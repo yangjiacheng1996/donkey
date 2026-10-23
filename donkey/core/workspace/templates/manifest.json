@@ -46,6 +46,14 @@
     { "path": "providers", "format": "directory" },
     { "path": "memory/sessions.sqlite3", "format": "sqlite3" },
     { "path": "memory/store.sqlite3", "format": "sqlite3" },
-    { "path": "memory/knowledge.sqlite3", "format": "sqlite3" }
+    { "path": "memory/knowledge.sqlite3", "format": "sqlite3" },
+    { "path": "tools/__init__.py", "format": "python" },
+    { "path": "tools/changes.py", "format": "python" },
+    { "path": "tools/filesystem.py", "format": "python" },
+    { "path": "tools/commandline.py", "format": "python" },
+    { "path": "tools/webfetch.py", "format": "python" },
+    { "path": "skills/example/reference/example.md", "format": "markdown" },
+    { "path": "skills/example/scripts/example.py", "format": "python" },
+    { "path": "skills/example/templates/example.md", "format": "markdown" }
   ]
 }

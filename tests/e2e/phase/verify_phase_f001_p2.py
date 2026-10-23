@@ -246,7 +246,7 @@ def test_scenario_1_new_workspace_full_tree(tmp_path: Path) -> None:
     assert completed.returncode == 0, (
         f"stdout={completed.stdout!r} stderr={completed.stderr!r}"
     )
-    assert "templates=46 created=40 skipped=0" in completed.stdout
+    assert "templates=54 created=48 skipped=0" in completed.stdout
     assert ws.is_dir()
 
     # 必填文件
@@ -266,11 +266,11 @@ def test_scenario_1_new_workspace_full_tree(tmp_path: Path) -> None:
         assert (ws / "memory" / name).is_file(), name
     assert (ws / "manifest.json").is_file()
 
-    # 落地物计数（spec SC-003）：41 个文件 = 37 文本 + 3 sqlite3 + 1 工作区清单
+    # 落地物计数（spec SC-003）：49 个文件 = 48 清单文件型条目 + 1 工作区清单
     files = [p for p in ws.rglob("*") if p.is_file()]
     directories = [p for p in ws.rglob("*") if p.is_dir()]
-    assert len(files) == 41
-    assert len(directories) + 1 == 7
+    assert len(files) == 49
+    assert len(directories) + 1 == 10
 
     # 双入口一致性（spec FR-060，沿用 P1 的惯例并入场景 1，不新增第 15 个函数）
     console_script = _resolve_console_script()
@@ -506,14 +506,18 @@ def test_scenario_10_rm_then_init(tmp_path: Path) -> None:
 # --- 场景 11 ~ 14（US11 ~ US14）---------------------------------------------------
 
 
-def test_scenario_11_no_builtin_tools_yet(tmp_path: Path) -> None:
-    """场景 11 · tools/ 下不含任何内置工具脚本与包初始化文件。"""
+def test_scenario_11_builtin_tools_present(tmp_path: Path) -> None:
+    """场景 11 · tools/ 下内置工具文件与包初始化文件已就位。
+
+    F001-P3 起这 4 个文件是清单内条目 —— P2 阶段的"尚未生成"否定断言已按
+    spec FR-068(e) 改写为 P3 口径（``tools/README.md`` 仍在）。
+    """
     argv, cwd = _resolve_donkey_command()
     ws = tmp_path / "ws"
     assert _init(argv, cwd, ws).returncode == 0
 
     for name in ("filesystem.py", "commandline.py", "webfetch.py", "__init__.py"):
-        assert not (ws / "tools" / name).exists(), name
+        assert (ws / "tools" / name).is_file(), name
     assert (ws / "tools" / "README.md").is_file()
 
 

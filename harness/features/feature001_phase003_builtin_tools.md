@@ -22,7 +22,7 @@
 | **预留 exit code** | 5–10（留给 v1.x 试运行期新错误） |
 | **本 Phase 不占用的 exit code** | 1 / 2（F001-P1）、3（F001-P2）、5–10 |
 | **对应验收脚本** | `tests/e2e/phase/verify_phase_f001_p3.py` |
-| **闭环复杂度（断言数）** | 中（15 断言） |
+| **闭环复杂度（断言数）** | 中（16 断言） |
 | **变更记录契约版本** | `CHANGE_RECORD_VERSION = 1`（见 §2.9 —— v4 diff 展示的接入面） |
 | **准入条件** | F001-P2 退出条件全部满足 + F001-P2 抛出的 `TemplateGenerationError` 已通过单元测试 |
 
@@ -190,10 +190,32 @@ donkey 是一个**智能体材料层的可移植运行时引擎**——workspace
 ### 3.4 技术栈就绪
 
 - Python 3.11+；
-- `httpx`（用于 `webfetch.py.txt` 模板与测试；如选 `requests` 也可，但 spec 默认 httpx）；
+- `httpx`（用于 `webfetch.py.txt` 模板与测试；如选 `requests` 也可，但 spec 默认 httpx）——
+  **依赖归属见 §9**：`httpx` 是**渲染进用户工作区**的模板依赖，**donkey 自身的运行期依赖仍恰为 1 个**（SC-021 不变）；`pytest-httpx` 是**新增 dev 依赖**，MUST 声明到 `[project.optional-dependencies].dev`；
 - pytest + `pytest-httpx`（用于 webfetch 的 HTTP mock 测试）；
-- `langchain_core.tools.tool` 装饰器（**纯 LangChain 内置**——`@tool` 装饰器从 `langchain_core.tools` import，**不**违反 N-04 / N-12；N-04 仅约束 cli/web/gui 客户端不直接 import langchain，`donkey.core` 允许使用 langchain 库 API）；
-- ruff + mypy + GitHub Actions。
+- `langchain_core.tools.tool` 装饰器（**纯 LangChain 内置**——`@tool` 装饰器从 `langchain_core.tools` import，**不**违反 N-04 / N-12；N-04 仅约束 cli/web/gui 客户端不直接 import langchain，`donkey.core` 允许使用 langchain 库 API）——**N-12 边界见 §9.1 的 D-17 说明**；
+- ruff + mypy + GitHub Actions —— **本 Phase MUST 交付 `.github/workflows/ci.yml`**（见 §6.16）。
+
+### 3.5 本 Phase 必须改写的 F001-P2 阶段边界断言（**P2 的断言按设计会被本 Phase 打破**）
+
+> **为什么需要这一节**：§7 要求「F001-P1 / F001-P2 前置套件必须全绿」，但 F001-P2 的若干
+> 断言**编码的是 P2 的阶段边界**（"清单恰 46 条" / "workspace 内无任何 `.py` 文件" /
+> "退出码集合恰为 {0,1,2,3}"），而本 Phase **按设计**要打破这些边界。
+> 故 P3 MUST **显式改写**下列断言（**MUST NOT** 改动 P2 的**持久**不变量，也 MUST NOT
+> 靠"改红 P2 的测试"或"让 P2 红着提交"蒙混过关）—— 与 F001-P1 → F001-P2 时
+> 「P1 的 3 处阶段边界断言被改写」的处理方式同构。
+
+| # | 落点 | P2 阶段的断言 | P3 落地后的正确口径 |
+|---|---|---|---|
+| 1 | `tests/unit/test_template_skeleton.py::test_template_assets_render_to_expected_tree` | `templates_loaded == 46` / `files_created == 40` / 落地 41 文件 | 清单 **54** 条、文件型 **48** 条、落地 **49** 文件（54 − 6 目录 + 1 工作区清单）；断言 MUST 改为**动态口径**（按 loader 实际返回值计算），绝对值 54/48/49 作为独立断言 |
+| 2 | `tests/unit/test_template_skeleton.py::test_no_builtin_tool_files_generated` | workspace 内**无任何 `.py` 文件**；`tools/` 下无 `filesystem.py` / `commandline.py` / `webfetch.py` / `__init__.py` | **本 Phase 落地这 5 个 `.py` 文件** → 该断言 MUST 改为「**除本 Phase 新增的 5 个内置工具文件外**无其它 `.py` 文件」，且 MUST 保留"无 `agent.py` / `main.py`"这条 **N-01 持久不变量**（宪法 N-01 只禁 Python **入口**文件，不禁工具模块） |
+| 3 | `tests/unit/test_template_skeleton.py::test_exit_code_set_is_exactly_0_to_3` | 本阶段使用的退出码集合恰为 `{0,1,2,3}` | 本 Phase **启用 exit 4**（`BuiltinToolGenerationError`）→ 集合变为 `{0,1,2,3,4}`；同时"运行期依赖恰为 1 个"的断言**保持不变**（SC-021 不受本 Phase 影响） |
+| 4 | `tests/e2e/phase/verify_phase_f001_p2.py::test_scenario_1_new_workspace_full_tree` | 落地 41 文件 / 7 目录；`templates=46 created=40 skipped=0` | 落地 **49** 文件 / 7 目录；`templates=54 created=48 skipped=0`（**P2 的 14 个场景断言本身仍必须全绿** —— 它们是 P2 的验收基线） |
+
+> **P2 的 e2e 场景 11（`test_scenario_11_no_builtin_tools_yet`）MUST 同样改写** —— 它断言
+> "tools/ 下无内置工具文件"，而那正是**本 Phase 的交付物**。P3 的 §6.1 / §6.7 是它的继任者。
+> P3 MUST 把 P2 的场景 11 改为「**除本 Phase 的 3 个内置工具外**无其它内置工具文件」，
+> 并把"无内置工具"的边界断言移交 P3 自己的场景。
 
 ---
 
@@ -1163,8 +1185,8 @@ if __name__ == "__main__":
 | `test_filesystem_read_write` | write_file → read_file | 内容一致 |
 | `test_filesystem_copy_move_delete` | copy / move / delete 三件套 | 操作符合预期 |
 | `test_filesystem_list_dir_stat` | list_dir / stat | 返回结构正确 |
-| `test_commandline_run_shell_echo` | `run_shell("echo hello")` | 返回 `"hello\n"`，`timed_out=False` |
-| `test_commandline_run_shell_timeout` | `run_shell("sleep 5", timeout=1)` | 返回 `timed_out=True` |
+| `test_commandline_run_shell_echo` | `run_shell("echo hello")` | 返回 **JSON 字符串**（`json.dumps`）——解析后 `stdout` 含 `"hello\n"`、`returncode == 0`、`timed_out is False` |
+| `test_commandline_run_shell_timeout` | `run_shell("sleep 5", timeout=1)` | 返回 **JSON 字符串**——解析后 `timed_out is True` |
 | `test_webfetch_get_mock` | 用 pytest-httpx mock 一个 GET 200 | 返回 JSON 含 `status_code=200`, `body="..."` |
 | `test_webfetch_timeout` | 用 pytest-httpx mock 延迟 5s + timeout=1 | **抛 `httpx.TimeoutException`**（模板的 `fetch_url` **不**捕获超时——异常透传给调用方，由 `ToolTimeoutError`（exit 33）在 F004 run 域统一映射） |
 | `test_tools_init_importable` | `from tools import filesystem, commandline, webfetch` | 无异常；3 个 tool 模块各至少 1 个 `@tool` 函数；`tools.changes` **0 个** `@tool`（契约库） |
@@ -1178,6 +1200,16 @@ if __name__ == "__main__":
 
 ### 4.9 集成测试（`tests/integration/test_init_to_load.py`）
 
+> **⚠️ 集成层在本 Phase 首次启用** —— F001-P2 的 `plan.md` G4 曾论证「`tests/integration/`
+> 保持空占位（P2 的 2 个新 core 模块由单一流水线串联、无跨模块协作契约）」，**该理由在本 Phase
+> 失效**：本 Phase 出现**真正的跨模块协作** —— `donkey init`（core 层）产出的 workspace 产物
+> （渲染层）被**独立进程** import 并调用（用户侧），这正是集成层的定义。
+> 故 P3 的 `plan.md` MUST **重新论证 G4**（从"留空"改为"启用"），并把
+> `tests/integration/` 从"空占位"改为实际测试目录。
+> **import 方式 MUST 与 §4.10 同口径** —— 用**独立子进程** import 渲染产物，MUST NOT 在测试
+> 进程内 `sys.path.insert` + `from tools.X import ...`（`sys.modules` 按名缓存会让后续场景
+> 测到**第一个** workspace 的产物，验收假绿）。
+
 **spec 必须列出**以下集成测试（**端到端集成预演**——**仅做 import 路径 + 函数签名测试，不做 F002 静态格式检查**）：
 
 | 用例 | 验证内容 |
@@ -1189,7 +1221,14 @@ if __name__ == "__main__":
 
 ### 4.10 verify 脚本（`tests/e2e/phase/verify_phase_f001_p3.py`）
 
-**黑盒测试**（禁止 import `donkey.*` 业务代码；只跑 `subprocess.run(["donkey", ...])`），15 个断言对应 §6 退出条件。
+**黑盒测试**（禁止 import `donkey.*` 业务代码；只跑 `subprocess.run(["donkey", ...])`），16 个断言对应 §6 退出条件。
+
+> **⚠️ MUST NOT 在测试进程内 `import` workspace 产物**（`from tools.filesystem import ...`）——
+> `sys.modules` 按**模块名**缓存，`sys.path.remove()` **不会**卸载模块：实测从 workspace A
+> 导入过 `tools.m` 后，再从 workspace B 导入拿到的**仍是 A 的模块**（`sys.modules["tools.m"]`
+> 命中缓存）→ 后续场景实际测的是**第一个** workspace 的产物，验收假绿。
+> 故凡需 import workspace 代码的场景，MUST 用**独立子进程**（`subprocess.run([sys.executable,
+> "-c", snippet], cwd=workspace)`）——既避开模块缓存，也更贴合宪法 §3.1「黑盒脚本只跑子进程」。
 
 ---
 
@@ -1206,7 +1245,7 @@ if __name__ == "__main__":
 
 ## 6. 退出条件（Exit Gate）
 
-**`tests/e2e/phase/verify_phase_f001_p3.py` 必须跑通以下 15 个断言**（顺序固定，每条独立可测）：
+**`tests/e2e/phase/verify_phase_f001_p3.py` 必须跑通以下 15 个场景断言**（顺序固定，每条独立可测），**且第 16 项 CI 交付条件同时满足**：
 
 ### 6.1 生成的 workspace 含 3 个 builtin tool + tools/__init__.py + tools/changes.py + tools/README.md
 
@@ -1230,35 +1269,46 @@ def test_scenario_2_tools_importable_with_docstrings(tmp_path):
     """场景 2：3 个 builtin tool 可 import，每个 @tool 有 docstring"""
     ws = tmp_path / "ws"
     subprocess.run(["donkey", "init", str(ws)], check=True, capture_output=True)
-    sys.path.insert(0, str(ws))
-    try:
-        from tools.filesystem import read_file, write_file, copy_file, move_file, delete_file, list_dir, stat
-        for fn in [read_file, write_file, copy_file, move_file, delete_file, list_dir, stat]:
-            assert fn.__doc__ is not None and len(fn.__doc__) > 20
-        from tools.commandline import run_shell
-        assert run_shell.__doc__ is not None and len(run_shell.__doc__) > 20
-        from tools.webfetch import fetch_url
-        assert fetch_url.__doc__ is not None and len(fetch_url.__doc__) > 20
-    finally:
-        sys.path.remove(str(ws))
+    # 独立子进程 import —— 避开 sys.modules 的按名缓存（见 §4.10 的说明）。
+    completed = subprocess.run(
+        [sys.executable, "-c", """
+import json
+from tools.filesystem import read_file, write_file, copy_file, move_file, delete_file, list_dir, stat
+from tools.commandline import run_shell
+from tools.webfetch import fetch_url
+fns = [read_file, write_file, copy_file, move_file, delete_file, list_dir, stat, run_shell, fetch_url]
+print(json.dumps({f.__name__: len(f.__doc__ or "") for f in fns}))
+"""],
+        capture_output=True, text=True, cwd=str(ws), timeout=60,
+    )
+    assert completed.returncode == 0, completed.stderr
+    doc_lengths = json.loads(completed.stdout)
+    for name, length in doc_lengths.items():
+        assert length > 20, name
 ```
 
-### 6.3 `commandline.run_shell("echo hello")` 返回 `"hello\n"`
+### 6.3 `commandline.run_shell("echo hello")` 返回 **JSON 字符串**（`stdout` / `stderr` / `returncode` / `timed_out`）
 
 ```python
 def test_scenario_3_commandline_run_shell_echo(tmp_path):
     """场景 3：run_shell("echo hello") 集成测试"""
     ws = tmp_path / "ws"
     subprocess.run(["donkey", "init", str(ws)], check=True, capture_output=True)
-    sys.path.insert(0, str(ws))
-    try:
-        from tools.commandline import run_shell
-        result = run_shell.invoke({"command": "echo hello"})
-        result_dict = json.loads(result)
-        assert "hello" in result_dict["stdout"]
-        assert result_dict["returncode"] == 0
-    finally:
-        sys.path.remove(str(ws))
+    completed = subprocess.run(
+        [sys.executable, "-c", """
+import json
+from tools.commandline import run_shell
+result = run_shell.invoke({"command": "echo hello"})
+print(result)
+"""],
+        capture_output=True, text=True, cwd=str(ws), timeout=60,
+    )
+    assert completed.returncode == 0, completed.stderr
+    # run_shell 的返回契约：**JSON 字符串**（与 §4.8 单测表逐字一致）。
+    result_dict = json.loads(completed.stdout)
+    assert "hello" in result_dict["stdout"]
+    assert result_dict["returncode"] == 0
+    assert result_dict["timed_out"] is False
 ```
 
 ### 6.4 `filesystem.py` 7 个 `@tool` 单元测试全绿
@@ -1268,27 +1318,36 @@ def test_scenario_4_filesystem_seven_tools(tmp_path):
     """场景 4：filesystem.py 7 个 @tool 单元测试（旧调用方式仍可用 = 向后兼容断言）"""
     ws = tmp_path / "ws"
     subprocess.run(["donkey", "init", str(ws)], check=True, capture_output=True)
-    sys.path.insert(0, str(ws))
-    try:
-        from tools.filesystem import read_file, write_file, copy_file, move_file, delete_file, list_dir, stat
-        # write + read
-        write_file.invoke({"path": str(ws / "test.txt"), "content": "hi"})
-        assert "hi" in read_file.invoke({"path": str(ws / "test.txt")})
-        # copy + move
-        copy_file.invoke({"src": str(ws / "test.txt"), "dst": str(ws / "test_copy.txt")})
-        assert (ws / "test_copy.txt").exists()
-        # list_dir
-        names = list_dir.invoke({"path": str(ws)})
-        assert "test.txt" in names
-        # stat —— 返回 dict（不是 JSON 字符串），直接取字段
-        s = stat.invoke({"path": str(ws / "test.txt")})
-        assert s["is_file"] is True
-        assert s["size"] > 0
-        # delete
-        delete_file.invoke({"path": str(ws / "test_copy.txt")})
-        assert not (ws / "test_copy.txt").exists()
-    finally:
-        sys.path.remove(str(ws))
+    completed = subprocess.run(
+        [sys.executable, "-c", """
+import json
+from tools.filesystem import read_file, write_file, copy_file, move_file, delete_file, list_dir, stat
+ws = %r
+# write + read
+write_file.invoke({"path": ws + "/test.txt", "content": "hi"})
+read_back = read_file.invoke({"path": ws + "/test.txt"})
+# copy + move
+copy_file.invoke({"src": ws + "/test.txt", "dst": ws + "/test_copy.txt"})
+# list_dir
+names = list_dir.invoke({"path": ws})
+# stat —— 返回 dict（不是 JSON 字符串），直接取字段
+st = stat.invoke({"path": ws + "/test.txt"})
+# delete
+delete_file.invoke({"path": ws + "/test_copy.txt"})
+print(json.dumps({"read_back": read_back, "names": names, "stat": st}))
+""" % str(ws)],
+        capture_output=True, text=True, cwd=str(ws), timeout=60,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert "hi" in payload["read_back"]
+    assert (ws / "test_copy.txt").exists()
+    assert "test.txt" in payload["names"]
+    # stat —— 返回 dict（不是 JSON 字符串），直接取字段
+    assert payload["stat"]["is_file"] is True
+    assert payload["stat"]["size"] > 0
+    # delete
+    assert not (ws / "test_copy.txt").exists()
 ```
 
 ### 6.5 `webfetch.py` HTTP mock 测试通过
@@ -1298,21 +1357,28 @@ def test_scenario_5_webfetch_http_mock(tmp_path, httpx_mock):
     """场景 5：webfetch HTTP mock 测试（pytest-httpx 的 httpx_mock fixture）"""
     ws = tmp_path / "ws"
     subprocess.run(["donkey", "init", str(ws)], check=True, capture_output=True)
-    sys.path.insert(0, str(ws))
-    try:
-        from tools.webfetch import fetch_url
+    # httpx_mock fixture 只对**本进程**生效 —— 故 mock 与 import MUST 同处一个
+    # 子进程（见 §4.10：MUST NOT 在测试进程内 import workspace 产物）。
+    with httpx_mock:
         httpx_mock.add_response(
             url="https://example.com",
             method="GET",
             status_code=200,
             text="mocked body",
         )
-        result = fetch_url.invoke({"url": "https://example.com"})
-        result_dict = json.loads(result)
-        assert result_dict["status_code"] == 200
-        assert "mocked body" in result_dict["body"]
-    finally:
-        sys.path.remove(str(ws))
+        completed = subprocess.run(
+            [sys.executable, "-c", """
+import json
+from tools.webfetch import fetch_url
+print(fetch_url.invoke({"url": "https://example.com"}))
+"""],
+            capture_output=True, text=True, cwd=str(ws), timeout=60,
+        )
+    assert completed.returncode == 0, completed.stderr
+    result = completed.stdout
+    result_dict = json.loads(result)
+    assert result_dict["status_code"] == 200
+    assert "mocked body" in result_dict["body"]
 ```
 
 ### 6.6 Skills example 三层完整
@@ -1392,16 +1458,21 @@ def test_scenario_10_integration_imports(tmp_path):
     """场景 10：集成预演——所有 builtin tool 可正常 import"""
     ws = tmp_path / "ws"
     subprocess.run(["donkey", "init", str(ws)], check=True, capture_output=True)
-    sys.path.insert(0, str(ws))
-    try:
-        from tools.filesystem import read_file, write_file, copy_file, move_file, delete_file, list_dir, stat
-        from tools.commandline import run_shell
-        from tools.webfetch import fetch_url
-        # 每个 @tool 函数存在且可调用
-        for fn in [read_file, write_file, copy_file, move_file, delete_file, list_dir, stat, run_shell, fetch_url]:
-            assert callable(fn)
-    finally:
-        sys.path.remove(str(ws))
+    completed = subprocess.run(
+        [sys.executable, "-c", """
+import json
+from tools.filesystem import read_file, write_file, copy_file, move_file, delete_file, list_dir, stat
+from tools.commandline import run_shell
+from tools.webfetch import fetch_url
+fns = [read_file, write_file, copy_file, move_file, delete_file, list_dir, stat, run_shell, fetch_url]
+print(json.dumps({"callable": all(callable(f) for f in fns), "count": len(fns)}))
+"""],
+        capture_output=True, text=True, cwd=str(ws), timeout=60,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["callable"] is True
+    assert payload["count"] == 9
 ```
 
 ### 6.11 不做 F002 静态检查
@@ -1423,30 +1494,38 @@ def test_scenario_12_write_file_returns_change_record(tmp_path):
     """场景 12：write_file 返回 change 记录（含 unified_diff / hash / action）"""
     ws = tmp_path / "ws"
     subprocess.run(["donkey", "init", str(ws)], check=True, capture_output=True)
-    sys.path.insert(0, str(ws))
-    try:
-        from tools.filesystem import write_file
-        target = ws / "demo.txt"
-        # 首次创建
-        r1 = json.loads(write_file.invoke({"path": str(target), "content": "a\nb\n"}))
-        assert r1["action"] == "create"
-        assert r1["applied"] is True
-        change = r1["change"]
-        assert change["version"] == 1
-        assert change["action"] == "create"
-        assert change["previous_exists"] is False
-        assert change["previous_hash"] is None
-        assert change["new_hash"].startswith("sha256:")
-        assert "+b" in change["unified_diff"]
-        # 二次更新：记录旧版本 hash + 真实 diff
-        r2 = json.loads(write_file.invoke({"path": str(target), "content": "a\nc\n"}))
-        change2 = r2["change"]
-        assert r2["action"] == "update"
-        assert change2["previous_exists"] is True
-        assert change2["previous_hash"] == change["new_hash"]
-        assert "-b" in change2["unified_diff"] and "+c" in change2["unified_diff"]
-    finally:
-        sys.path.remove(str(ws))
+    completed = subprocess.run(
+        [sys.executable, "-c", """
+import json
+from tools.filesystem import write_file
+target = %r
+# 首次创建
+r1 = json.loads(write_file.invoke({"path": target, "content": "a\nb\n"}))
+# 二次更新：记录旧版本 hash + 真实 diff
+r2 = json.loads(write_file.invoke({"path": target, "content": "a\nc\n"}))
+print(json.dumps({"r1": r1, "r2": r2}))
+""" % str(ws / "demo.txt")],
+        capture_output=True, text=True, cwd=str(ws), timeout=60,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    r1 = payload["r1"]
+    assert r1["action"] == "create"
+    assert r1["applied"] is True
+    change = r1["change"]
+    assert change["version"] == 1
+    assert change["action"] == "create"
+    assert change["previous_exists"] is False
+    assert change["previous_hash"] is None
+    assert change["new_hash"].startswith("sha256:")
+    assert "+b" in change["unified_diff"]
+    # 二次更新：记录旧版本 hash + 真实 diff
+    r2 = payload["r2"]
+    change2 = r2["change"]
+    assert r2["action"] == "update"
+    assert change2["previous_exists"] is True
+    assert change2["previous_hash"] == change["new_hash"]
+    assert "-b" in change2["unified_diff"] and "+c" in change2["unified_diff"]
 ```
 
 ### 6.13 dry_run 只预览不落盘
@@ -1456,23 +1535,26 @@ def test_scenario_13_dry_run_does_not_touch_disk(tmp_path):
     """场景 13：dry_run=True 不产生任何磁盘副作用，但仍返回 diff"""
     ws = tmp_path / "ws"
     subprocess.run(["donkey", "init", str(ws)], check=True, capture_output=True)
-    sys.path.insert(0, str(ws))
-    try:
-        from tools.filesystem import write_file
-        target = ws / "demo.txt"
-        write_file.invoke({"path": str(target), "content": "old\n"})
-        r = json.loads(write_file.invoke({
-            "path": str(target), "content": "new\n", "dry_run": True,
-        }))
-        assert r["applied"] is False
-        assert r["change"]["applied"] is False
-        assert "-old" in r["change"]["unified_diff"]
-        # 文件内容未变
-        assert target.read_text(encoding="utf-8") == "old\n"
-        # 无临时文件残留
-        assert not list(ws.glob("*.donkey-tmp"))
-    finally:
-        sys.path.remove(str(ws))
+    completed = subprocess.run(
+        [sys.executable, "-c", """
+import json
+from tools.filesystem import write_file
+target = %r
+write_file.invoke({"path": target, "content": "old\n"})
+r = json.loads(write_file.invoke({"path": target, "content": "new\n", "dry_run": True}))
+print(json.dumps({"r": r}))
+""" % str(ws / "demo.txt")],
+        capture_output=True, text=True, cwd=str(ws), timeout=60,
+    )
+    assert completed.returncode == 0, completed.stderr
+    r = json.loads(completed.stdout)["r"]
+    assert r["applied"] is False
+    assert r["change"]["applied"] is False
+    assert "-old" in r["change"]["unified_diff"]
+    # 文件内容未变
+    assert (ws / "demo.txt").read_text(encoding="utf-8") == "old\n"
+    # 无临时文件残留
+    assert not list(ws.glob("*.donkey-tmp"))
 ```
 
 ### 6.14 写失败不破坏旧内容 + 无临时文件残留（原子写）
@@ -1484,14 +1566,22 @@ def test_scenario_14_atomic_write_failure_keeps_old_content(tmp_path):
     subprocess.run(["donkey", "init", str(ws)], check=True, capture_output=True)
     blocker = ws / "blocker"
     blocker.write_text("原内容\n", encoding="utf-8")
-    sys.path.insert(0, str(ws))
-    try:
-        from tools.filesystem import write_file
-        # 父路径是文件 → mkdir 失败 → 写入整体失败
-        with pytest.raises(OSError):
-            write_file.invoke({"path": str(blocker / "child.txt"), "content": "新内容\n"})
-    finally:
-        sys.path.remove(str(ws))
+    completed = subprocess.run(
+        [sys.executable, "-c", """
+import json
+from tools.filesystem import write_file
+try:
+    write_file.invoke({"path": %r, "content": "新内容\n"})
+except OSError as exc:
+    print(json.dumps({"raised": type(exc).__name__}))
+else:
+    print(json.dumps({"raised": None}))
+""" % str(blocker / "child.txt")],
+        capture_output=True, text=True, cwd=str(ws), timeout=60,
+    )
+    assert completed.returncode == 0, completed.stderr
+    # 父路径是文件 → mkdir 失败 → 写入整体失败
+    assert json.loads(completed.stdout)["raised"] is not None
     # 旧内容完好
     assert blocker.read_text(encoding="utf-8") == "原内容\n"
     # 无临时文件残留
@@ -1506,26 +1596,56 @@ def test_scenario_15_delete_record_and_contract_version(tmp_path):
     """场景 15：delete_file 返回 action=delete + previous_hash；契约版本 == 1"""
     ws = tmp_path / "ws"
     subprocess.run(["donkey", "init", str(ws)], check=True, capture_output=True)
-    sys.path.insert(0, str(ws))
-    try:
-        from tools.changes import CHANGE_RECORD_VERSION
-        from tools.filesystem import delete_file, write_file
-        assert CHANGE_RECORD_VERSION == 1
-        target = ws / "demo.txt"
-        write_file.invoke({"path": str(target), "content": "x\n"})
-        r = json.loads(delete_file.invoke({"path": str(target)}))
-        assert r["action"] == "delete"
-        assert r["type"] == "file"
-        assert r["change"]["previous_hash"].startswith("sha256:")
-        assert r["change"]["new_hash"] is None
-        assert not target.exists()
-    finally:
-        sys.path.remove(str(ws))
+    completed = subprocess.run(
+        [sys.executable, "-c", """
+import json
+from tools.changes import CHANGE_RECORD_VERSION
+from tools.filesystem import delete_file, write_file
+target = %r
+write_file.invoke({"path": target, "content": "x\n"})
+r = json.loads(delete_file.invoke({"path": target}))
+print(json.dumps({"version": CHANGE_RECORD_VERSION, "r": r}))
+""" % str(ws / "demo.txt")],
+        capture_output=True, text=True, cwd=str(ws), timeout=60,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["version"] == 1
+    r = payload["r"]
+    assert r["action"] == "delete"
+    assert r["type"] == "file"
+    assert r["change"]["previous_hash"].startswith("sha256:")
+    assert r["change"]["new_hash"] is None
+    assert not (ws / "demo.txt").exists()
 ```
 
-### 6.16 退出条件总览
+### 6.16 CI 工作流文件已交付（临时例外 E-01 到期闭合）
 
-verify_phase_f001_p3.py 的 15 个 `test_*` 函数全部 PASS → F001-P3 完成。**F001 整体完成**。
+> **⚠️ 本条是宪法强制项，不是可选项**：宪法 §6.3 的临时例外 **E-01**（"F001-P1 与 F001-P2
+> **均不**交付 `.github/workflows/ci.yml`）的**过期时间是「F001-P3 结束前」** —— 即
+> **本 Phase MUST 交付该文件**（或由 Maintainer 显式决定转为正式纳入宪法；本 Phase 采用前者）。
+> 若 15 个场景断言全绿而 `ci.yml` 缺失 → 临时例外已过期 → **F001-P3 收尾即宪法违例**。
+
+```python
+def test_scenario_16_ci_workflow_delivered():
+    """场景 16：CI 工作流文件已交付（宪法 §6.3 临时例外 E-01 到期闭合）"""
+    workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+    assert workflow.is_file(), "临时例外 E-01 已到期：.github/workflows/ci.yml MUST 在本 Phase 内交付"
+    content = workflow.read_text(encoding="utf-8")
+    # 最小内容骨架（= plan G5 记录的 CI 最小内容）
+    assert "pytest tests/" in content
+    assert "--cov=donkey.core" in content
+    assert "--cov-fail-under=80" in content
+    assert "ruff check" in content
+    assert "mypy" in content
+```
+
+> **注意**：本脚本是**黑盒**的 —— 它只断言**仓库内的一个文件是否存在且含关键命令**，
+> MUST NOT import `donkey.*` 业务代码，也 MUST NOT 跑 CI（CI 自身的执行属 GitHub 侧）。
+
+### 6.17 退出条件总览
+
+verify_phase_f001_p3.py 的 15 个 `test_*` 函数 + §6.16 的 CI 交付条件全部 PASS → F001-P3 完成。**F001 整体完成**。
 
 ---
 
@@ -1546,7 +1666,7 @@ verify_phase_f001_p3.py 的 15 个 `test_*` 函数全部 PASS → F001-P3 完成
    ```bash
    pytest tests/unit/test_builtin_tools.py -v                    # 至少 15 个
    pytest tests/integration/test_init_to_load.py -v              # 至少 4 个
-   pytest tests/e2e/phase/verify_phase_f001_p3.py -v             # 15 个
+   pytest tests/e2e/phase/verify_phase_f001_p3.py -v             # 15 个场景断言
    ```
 
 3. **静态检查**：
@@ -1574,6 +1694,13 @@ verify_phase_f001_p3.py 的 15 个 `test_*` 函数全部 PASS → F001-P3 完成
    pytest tests/ -v
    ```
    F001-P1 / P2 / P3 全部测试 PASS；其它 Phase（F002 ~ F006）的测试允许 FAIL。
+
+6. **CI 工作流交付自检**（宪法 §6.3 临时例外 E-01 到期，**本 Phase MUST 交付**）：
+   ```bash
+   test -f .github/workflows/ci.yml && echo "OK ci.yml 已交付" || echo "FAIL E-01 已到期，ci.yml 缺失"
+   grep -cE "pytest tests/|--cov=donkey.core|--cov-fail-under=80|ruff check|mypy" .github/workflows/ci.yml
+   ```
+   期望：文件存在，且 5 条关键命令全部命中（≥ 5）。
 
 ---
 
@@ -1608,11 +1735,25 @@ verify_phase_f001_p3.py 的 15 个 `test_*` 函数全部 PASS → F001-P3 完成
 ## 9. 技术栈与依赖硬约束
 
 - **Python 3.11+**；
-- **HTTP 客户端**：`httpx`（用于 `tools/webfetch.py` 模板与测试）；`pytest-httpx` 用于 mock；
+- **HTTP 客户端**：`httpx`（用于 `tools/webfetch.py` **模板**与测试）；`pytest-httpx` 用于 mock；
+  - **依赖归属（MUST 写清，否则读者会误判 SC-021 变成 2）**：
+    - `httpx` 是**渲染进用户工作区**的**模板依赖** —— 用户在自己的 workspace 里跑
+      `tools/webfetch.py` 时才需要它；**donkey 自身的运行期依赖不变，仍恰为 1 个**
+      （`langgraph-checkpoint-sqlite`，spec SC-021 / FR-067 **不受影响**）；
+    - `pytest-httpx` 是**新增 dev 依赖** —— MUST 声明到 `pyproject.toml` 的
+      `[project.optional-dependencies].dev`（**不**进 `[project].dependencies`）。
+      F001-P1 / P1-P2 均明确「本 Phase 无新增 dev 依赖」，**本 Phase 是第一次**；
 - **LangChain 内置工具装饰器**：`from langchain_core.tools import tool` —— `@tool` 是 LangChain 内置功能，**不**违反 N-04 / N-12；N-04 仅约束 `cli` / `web` / `gui` 客户端不直接 import langchain，**`donkey.core` 允许使用 langchain 库 API**；
+  - **N-12 边界（见 §9.1 的补充说明）**：`langchain-core` 会把 `langsmith` 作为**硬传递依赖**装到磁盘，
+    且 `from langchain_core.tools import tool` 会让 `langsmith` 进入**导入方进程**（实测
+    `langsmith in sys.modules == True`）。按宪法 **D-17**，N-12 的约束对象是 **donkey 自有代码路径**
+    （`donkey.core` / `cli` / `web` / `gui`）的 import 与使用；`tools/*.py` 是**渲染进用户工作区**的
+    产物、属**用户代码路径** → **合规**。但 MUST 在 P3 的 spec 中显式登记这条推理（否则按
+    quickstart §1 的门禁冒烟口径复核时会误判为门禁失败）；
 - **测试**：pytest + pytest-httpx；
 - **静态检查**：ruff + mypy；
-- **CI**：GitHub Actions。
+- **CI**：GitHub Actions —— **本 Phase MUST 交付 `.github/workflows/ci.yml`**（宪法 §6.3 临时例外
+  E-01 到期；见 §6.16）。
 
 ### 9.1 永不使用清单
 
@@ -1623,13 +1764,24 @@ verify_phase_f001_p3.py 的 15 个 `test_*` 函数全部 PASS → F001-P3 完成
 - ❌ `tools/filesystem.py` 内含 `glob_search` / `grep_search`（由 `FilesystemFileSearchMiddleware` 接管）；
 - ❌ `import langsmith` 或 `langchain.langsmith` / `langchain_community.langsmith` / `langgraph.langsmith` 等任何 langsmith.* 子包。
 
+> **边界说明（N-12 × D-17，2026-10-23 澄清）**：本 Phase 的 `tools/*.py` 模板会
+> `from langchain_core.tools import tool` —— `langchain-core` 把 `langsmith` 作为**硬传递依赖**，
+> 因此 `langsmith` 会（a）被装到磁盘、（b）在**导入该模板的进程**里进入 `sys.modules`
+> （实测 `True`）。按宪法 **D-17**，N-12 约束的是 **donkey 自有代码路径**的 import 与使用 ——
+> `tools/*.py` 是**渲染进用户工作区**的产物，属**用户代码路径**，donkey 自身**永不 import** 它
+> → **合规**。落地要求：
+> ① 本 Phase 的 spec MUST 显式登记这条边界推理；
+> ② quickstart §1 的门禁冒烟（`langsmith in sys.modules` MUST 为 False）MUST 限定为
+> **donkey 自有代码路径**的导入链 —— 不得拿"用户 import 渲染产物"的语境去复核它；
+> ③ 渲染产物本身 MUST NOT 含任何 langsmith 字样（SC-017 的 workspace 侧）。
+
 ### 9.2 分层架构硬约束（N-01 ~ N-12）
 
 | 编号 | 条款 | 本 Phase 落地 |
 |---|---|---|
 | **N-01** | workspace 内禁止 `agent.py` / `main.py` | ✓ 生成的 3 个 builtin tool 文件 + `tools/changes.py` **均不含** `if __name__ == "__main__": sys.exit(...)` 形式入口（Skills example 的 `scripts/example.py` 是 Level 3 演示脚本，**允许**含 `__main__` 块，但**不是** workspace 入口） |
 | **N-02** | 禁止 subagent / 子智能体相关目录或字段 | ✓ 生成的 3 个 builtin tool 无任何 subagent 字段；Skills example 不涉及 subagent |
-| **N-03** | `donkey.core` 禁止 import `cli` / `web` / `gui` | ✓ 本 Phase 不修改 `core/` 下任何已有模块；只追加 .txt 模板源 |
+| **N-03** | `donkey.core` 禁止 import `cli` / `web` / `gui` | ✓ 本 Phase **不修改** `core/workspace/` 下任何已有模块（`init.py` / `manifest.py` / `sqlite3_templates.py` 一律不动），只追加 `.txt` 模板源；仅在 `core/exceptions.py` 追加 1 个错误类、`core/exit_codes.py` 追加 1 个常量（**均不引入新 import**） |
 | **N-04** | `cli` 禁止直接 import `langchain` / `langgraph` / `sqlite3` | ✓ 本 Phase 仅修改 `cli/cli_client.py` 1 行（追加异常映射）；无 langchain import |
 | **N-05** | `donkey.core` 禁止 import `argparse` / `sys.argv` / `click` / `typer` | ✓ |
 | **N-08** | exit code 段位不重叠 | ✓ 本 Phase 占 exit 4，落在 F001 段位 1–10 内 |
@@ -1656,10 +1808,10 @@ verify_phase_f001_p3.py 的 15 个 `test_*` 函数全部 PASS → F001-P3 完成
 
 执行 `/speckit.specify` 后生成的 `specs/001-donkey-init-workspace/phase-3-builtin-tools/spec.md` **必须**包含：
 
-1. **User Stories**：按优先级 P1 → P15 列出 15 个核心场景（对应 §6 的 15 个 verify 断言）；
+1. **User Stories**：按优先级 P1 → P15 列出 15 个核心场景（对应 §6 的 15 个 verify 场景断言）；
 2. **Functional Requirements (FR-001 ~ FR-NNN)**：覆盖 §4 的 10 个子节（4.1 ~ 4.10），含 9 个 `@tool` 函数签名、**变更记录契约（`CHANGE_RECORD_VERSION = 1` + §2.9 的 15 个字段 schema + 四条硬规则 R-D1 ~ R-D4 + 只增不改三原则）**、Skills 三层文件清单、manifest 追加条目；FR 中如需引用 F001-P1 / F001-P2 已实现的函数（`validate_init_request` / `render_templates` / `init_workspace_inner` 等），仅引用**函数签名与行为契约**，不复述其实现细节（详见 §3.2 函数契约小节）；
 3. **Edge Cases**：本 Phase 边界条件（用户自定义 `tools/*.py` 不被 `--force` 删 / 用户 rm builtin tool 后 init 补齐 / Skills Level 3 目录被 `--force` 递归清空 / `expected_hash` 不匹配导致写入被拒 / 写失败后旧内容完好 / `run_shell` 副作用不进变更记录 / 等）；
-4. **Success Criteria (SC-001 ~ SC-NNN)**：可量化的退出条件（"15 个 verify 断言全部 PASS"、"F001-P1 7 个 + F001-P2 14 个断言仍全绿"、"单测 15 个 + 集成测试 4 个 + verify 15 个全绿"、"变更记录 schema 字段集与 §2.9 完全一致（键集合断言）"、"ruff + mypy 零 error"等）；
+4. **Success Criteria (SC-001 ~ SC-NNN)**：可量化的退出条件（"15 个 verify 场景断言全部 PASS + CI 工作流文件已交付"、"F001-P1 7 个 + F001-P2 14 个断言仍全绿"、"单测 15 个 + 集成测试 4 个 + verify 15 个全绿"、"变更记录 schema 字段集与 §2.9 完全一致（键集合断言）"、"ruff + mypy 零 error"等）；
 5. **Key Entities**：`BuiltinToolGenerationError` 异常类；`filesystem.read_file` / `write_file` / `copy_file` / `move_file` / `delete_file` / `list_dir` / `stat` / `commandline.run_shell` / `webfetch.fetch_url` 共 9 个 `@tool` 工具函数；**变更记录（change record）契约**（`tools.changes` 契约库 + `CHANGE_RECORD_VERSION` + 记录字段集 + `FileChangedError`）；Skills Level 1/2/3 三层模型；
 6. **Assumptions**：F001-P1 (`cli_validation`) + F001-P2 (`template_skeleton`) 均已完成并退出；`langchain_core.tools.tool` 装饰器可用；`httpx` 与 `pytest-httpx` 已安装；**diff 审阅归引擎层**（v4 或 fork，AC-5）——本 Phase 只交出变更记录。
 

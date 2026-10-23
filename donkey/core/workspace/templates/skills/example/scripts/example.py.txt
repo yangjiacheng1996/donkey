@@ -1,0 +1,18 @@
+"""Example Script（Level 3 示例）。
+
+本文件演示 Skill 的第三层内容 —— 可由模型通过命令工具调用。
+
+它是一个**普通的用户脚本**：不是智能体入口，也不创建任何智能体。
+"""
+
+import sys
+
+
+def main() -> int:
+    """演示被调用后打印一行输出 —— 仅此一件事。"""
+    print("Hello from skills/example/scripts/example.py")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

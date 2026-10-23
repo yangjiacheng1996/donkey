@@ -13,12 +13,14 @@ from typing import NoReturn
 
 import donkey.core.api as core_api
 from donkey.core.exceptions import (
+    BuiltinToolGenerationError,
     PathNotFoundError,
     PathPermissionError,
     TemplateGenerationError,
     WorkspaceInitError,
 )
 from donkey.core.exit_codes import (
+    EXIT_CODE_BUILTIN_TOOL_GENERATION,
     EXIT_CODE_OK,
     EXIT_CODE_PATH_NOT_FOUND,
     EXIT_CODE_PATH_PERMISSION,
@@ -33,6 +35,7 @@ _EXCEPTION_TO_EXIT_CODE: dict[type[Exception], int] = {
     PathNotFoundError: EXIT_CODE_PATH_NOT_FOUND,
     PathPermissionError: EXIT_CODE_PATH_PERMISSION,
     TemplateGenerationError: EXIT_CODE_TEMPLATE_GENERATION,
+    BuiltinToolGenerationError: EXIT_CODE_BUILTIN_TOOL_GENERATION,
 }
 
 

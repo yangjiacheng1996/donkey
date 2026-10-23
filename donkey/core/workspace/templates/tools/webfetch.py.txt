@@ -1,0 +1,154 @@
+"""发起 HTTP 请求的 `@tool` —— donkey 工作区内置工具。
+
+本模块属于**材料层**（工作区），由 `donkey init` 生成，可由用户编辑或删除。
+
+使用 httpx（同步客户端），每次调用都**新建连接** —— 不持久化任何会话凭据
+（Cookie / 令牌一律不落盘）。响应正文**原样返回**，不做 HTML 到 Markdown
+的转换：转换属呈现层的事，材料层只交出原材料。
+
+本工具需要用户在自己的工作区里安装 HTTP 客户端库 —— 该库是**渲染进工作区
+的模板依赖**，donkey 自身不携带、也不保证已安装；缺库时导入即失败。
+"""
+
+from __future__ import annotations
+
+import json
+from urllib.parse import urlsplit
+
+import httpx
+from langchain_core.tools import tool
+
+#: 允许的协议白名单 —— 只有 http 与 https。
+ALLOWED_SCHEMES = frozenset({"http", "https"})
+
+#: 响应体的字节上限（5 MiB）。超限即报错。
+MAX_BODY_BYTES = 5 * 1024 * 1024
+
+#: 超时值的上限（秒）。超过即在**发请求前**报错。
+MAX_TIMEOUT_SECONDS = 120
+
+#: 属于文本类的、精确匹配的 MIME 取值。
+_TEXT_MIME_EXACT = frozenset(
+    {"application/json", "application/xml", "application/xhtml+xml"}
+)
+
+
+@tool
+def fetch_url(
+    url: str,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    timeout: int = 30,
+) -> str:
+    """发起一次 HTTP 请求并返回响应正文（JSON 文本）。
+
+    这是**只读**工具：MUST NOT 产生变更记录，MUST NOT 落盘任何内容。响应
+    正文**原样返回**（不做 HTML 到 Markdown 的转换）。
+
+    本工具有四道边界，命中即报错，MUST NOT 放行：
+
+    1. **协议白名单** —— 只允许 ``http`` 与 ``https`` 两种协议；``ftp://`` /
+       ``file://`` 等其它协议在**发请求前**即报错。
+    2. **响应体上限 5 MiB** —— 先看响应头声明的 ``Content-Length``，再在
+       **读取响应体的过程中**持续守住上限；超限即报错。
+    3. **非文本 MIME 拒绝** —— 只接受文本类 MIME（``text/*`` 以及
+       ``application/json`` / ``application/xml`` / ``application/xhtml+xml``）；
+       图片、PDF 等非文本 MIME 一律报错。
+    4. **非 2xx 报错** —— 状态码不在 2xx 区间即报错，MUST NOT 返回正文。
+
+    **本工具不限制地址范围** —— 不实现任何形式的地址黑名单 / 白名单 / 代理 /
+    沙箱：回环地址、私有网段一律照常请求。
+
+    网络异常（超时 / 网络 / 协议错误）**透传**给调用方，MUST NOT 被吞掉。
+
+    Args:
+        url: 目标地址（须带协议前缀，如 ``https://example.com``）。
+        method: HTTP 方法（默认 ``"GET"``）；支持 ``GET`` / ``POST`` / ``PUT`` /
+            ``DELETE`` / ``PATCH`` / ``HEAD``。
+        headers: 可选的请求头字典。
+        timeout: 请求超时秒数（默认 ``30``）。**上限 120 秒** —— 超过即在
+            发请求前报错。
+
+    Returns:
+        JSON 文本，恰含四个字段：``status_code``（状态码）/ ``body``（正文）/
+        ``headers``（响应头）/ ``url``（重定向后的最终地址）。
+
+    Raises:
+        ValueError: 协议不在白名单内、超时值超过 120 秒、响应体超过 5 MiB，
+            或响应的 MIME 不是文本类。
+        httpx.HTTPStatusError: 响应状态码不在 2xx 区间。
+        httpx.TimeoutException: 请求超时（异常透传给调用方）。
+    """
+    if timeout > MAX_TIMEOUT_SECONDS:
+        raise ValueError(
+            f"timeout {timeout}s exceeds the {MAX_TIMEOUT_SECONDS}s upper bound"
+        )
+
+    scheme = urlsplit(url).scheme.lower()
+    if scheme not in ALLOWED_SCHEMES:
+        raise ValueError(
+            f"unsupported scheme {scheme!r}; only http and https are allowed"
+        )
+
+    with httpx.Client(
+        trust_env=False,
+        follow_redirects=True,
+        timeout=timeout,
+    ) as client:
+        with client.stream(
+            method.upper(),
+            url,
+            headers=headers or {},
+        ) as response:
+            declared = response.headers.get("content-length")
+            # 声明的长度不是合法整数时忽略它 —— 改为在读取过程中守上限。
+            if declared is not None and declared.strip().isdigit():
+                if int(declared) > MAX_BODY_BYTES:
+                    raise ValueError(
+                        f"response body is too large: {declared} bytes "
+                        f"exceeds the {MAX_BODY_BYTES} byte upper bound"
+                    )
+
+            content_type = response.headers.get("content-type")
+            if not _is_text_mime(content_type):
+                raise ValueError(
+                    f"unsupported content type {content_type!r}; "
+                    f"only textual MIME types are accepted"
+                )
+
+            response.raise_for_status()
+
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in response.iter_bytes():
+                total += len(chunk)
+                if total > MAX_BODY_BYTES:
+                    raise ValueError(
+                        f"response body exceeds the {MAX_BODY_BYTES} byte upper bound"
+                    )
+                chunks.append(chunk)
+
+            body = b"".join(chunks).decode("utf-8", errors="replace")
+            return json.dumps(
+                {
+                    "status_code": response.status_code,
+                    "body": body,
+                    "headers": dict(response.headers),
+                    "url": str(response.url),
+                },
+                ensure_ascii=False,
+            )
+
+
+# --- 内部辅助 -------------------------------------------------------------------
+
+
+def _is_text_mime(content_type: str | None) -> bool:
+    """判断响应的 MIME 是否属于文本类。"""
+    if not content_type:
+        # 未声明 MIME —— 不据此拒绝。
+        return True
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    if media_type.startswith("text/"):
+        return True
+    return media_type in _TEXT_MIME_EXACT
