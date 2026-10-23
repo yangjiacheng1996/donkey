@@ -1,0 +1,22 @@
+# =============================================================================
+# providers/tencent.toml —— 腾讯混元（OpenAI 兼容）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "tencent" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+api_key = ""                  # 腾讯云 API SecretId:SecretKey 组合
+api_host = ""                 # 默认 "https://api.hunyuan.cloud.tencent.com/v1"
+timeout = 60
+max_retries = 6
+temperature = 1.0
+max_tokens = 4096
+
+[models.hunyuan-pro]
+max_tokens = 4096

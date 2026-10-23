@@ -1,0 +1,63 @@
+# =============================================================================
+# providers/openai.toml —— OpenAI（含 o 系列推理模型）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "openai" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+# 鉴权密钥。必填。OpenAI 官方 API key。
+# 类型：str
+# 默认：""
+# 鉴权：填入后由解析层加 "Authorization: Bearer <api_key>" header
+api_key = ""
+
+# 自定义 API 端点。选填。
+# 类型：str (URL)
+# 默认："" → 解析层用 OpenAI 官方 "https://api.openai.com/v1"
+# 示例：填 "https://api.openai.com/v1" / "https://openrouter.ai/api/v1" 等 OpenAI 兼容端点
+api_host = ""
+
+# OpenAI 专属：组织 ID。选填。
+# 类型：str（"org-" 开头的 24 字符 ID）
+# 默认：""
+# 鉴权：解析层加 "OpenAI-Organization: <openai_organization>" header
+openai_organization = ""
+
+# OpenAI 专属：项目 ID。选填。
+# 类型：str
+# 默认：""
+openai_project = ""
+
+# 请求超时（秒）。选填。默认 60。
+timeout = 60
+
+# 重试次数。选填。默认 6。
+max_retries = 6
+
+# 默认 temperature（所有未在 models 下覆盖的模型用此值）。选填。默认 1.0。
+# 范围：[0.0, 2.0]
+temperature = 1.0
+
+# 默认 max_tokens。选填。默认 16384。
+# 注：解析层会按模型分派（o-series 用 max_completion_tokens；其它用 max_tokens）
+max_tokens = 16384
+
+# OpenAI 旗下注册的模型
+[models.gpt-4o]
+# 模型级 temperature（覆盖 provider 默认）
+temperature = 1.0
+max_tokens = 16384
+
+[models.o3]
+# o 系列推理模型专属
+reasoning_effort = "high"   # "low" | "medium" | "high"
+
+[models.gpt-4o-mini]
+temperature = 0.7
+max_tokens = 16384

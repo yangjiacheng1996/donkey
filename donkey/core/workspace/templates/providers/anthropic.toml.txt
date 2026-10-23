@@ -1,0 +1,83 @@
+# =============================================================================
+# providers/anthropic.toml —— Anthropic Claude
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "anthropic" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+# 鉴权密钥。必填。Anthropic 官方 API key。
+# 类型：str
+api_key = ""
+
+# 自定义 API 端点。选填。Anthropic 官方不支持第三方端点；填了 → warning。
+# 类型：str (URL)
+# 默认："" → 解析层用 "https://api.anthropic.com"
+api_host = ""
+
+timeout = 60
+max_retries = 6
+
+
+# ⚠️ 采样参数限制（LangChain 源码实测 langchain_anthropic 1.7.6 实装代码 `chat_models.py:1809-1860`，函数 `_assert_valid_model_configuration`）：
+#
+# 限制模型清单与边界条件
+#
+# langchain_anthropic 源码实测支持以下前缀的真实模型名：
+# - `claude-fable-5` / `claude-fable-5-1` / `claude-sonnet-5-5` / `claude-opus-5-5`
+#   —— 通过 `startswith()` 在 `:1809-1810` 显式识别，且 `_supports_forced_tool_choice:1157-1159`
+#   显式点名 `("claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5")` 三个 model。
+# - 以下模型严格限制（实测 langchain_anthropic `:1809-1834` 抛 `ValueError`）：
+#     claude-fable-5 / claude-fable-5-1 / claude-sonnet-5-5
+#         - top_k：任何值都拒绝（必须不传 / 不显式写）
+#         - top_p：仅接受 1（其它值 raise ValueError，msg: "non-default values"）
+#         - temperature：仅接受 1（其它值 raise ValueError，msg: "non-default values"）
+#         - thinking.type = "disabled"：禁止（必须省略或用 adaptive）
+#         - thinking.type = "enabled" + budget_tokens：禁止（必须用 adaptive + output_config.effort；实测 `:1837-1846`）
+# - 以下模型拒收非默认采样参数（provider 层 400 错误，与 LangChain 抛错语义一致）：
+#     claude-opus-5 / claude-opus-5-5 / claude-opus-4-8 / claude-opus-4-7 / claude-sonnet-5
+#         - model 节强制 temperature = 1.0 / top_p = 1.0 / top_k 必须不传
+#         - thinking.type = "enabled" + budget_tokens：禁止（用 adaptive + output_config.effort）
+#         - thinking.type = "disabled" + output_config.effort ∈ {"xhigh", "max"}：禁止（实测 `:1848-1860`）
+#           —— 用 adaptive thinking，或 omit `thinking`，或把 effort 设为 `high` 或以下
+# - 以下模型接受任意 temperature / top_p / top_k：
+#     claude-opus-4-6 / claude-sonnet-4-6 / claude-haiku-4-5 及更早模型
+#
+# 建议：
+# - 温度用 1.0 默认；老模型覆盖可放开；新模型必须保持 1.0
+# - Sonnet 4.6 / Haiku 4.5 等"老模型"才允许 top_p / top_k 显式覆盖
+# - Opus 4.8+ / Sonnet 5.x+ / Fable 5+ 强制 temperature=1.0 + 省略 top_p / top_k
+# - 推理模型（Opus 4.6+ / Sonnet 4.5+ / Fable 5+）一律用 `thinking.type = "adaptive"`，
+#   显式 budget_tokens 仅在 Sonnet 4.5-4.6 上可用
+temperature = 1.0             # 范围：[0.0, 1.0]
+max_tokens = 4096             # ⚠️ Anthropic 必填 max_tokens
+# Anthropic 专属：是否启用 thinking。选填。默认 disabled。
+# 类型：table
+# 字段：type ("enabled" | "disabled" | "adaptive"), budget_tokens (int)
+# 注：仅 Claude Sonnet 4.5+ / Opus 4.6+ 支持
+# adaptive 模式（Opus 4.6+）自动决定 budget_tokens；Sonnet 必须显式 budget_tokens
+[thinking]
+type = "disabled"
+budget_tokens = 10000
+
+[models.claude-sonnet-4-6]
+max_tokens = 4096
+temperature = 1.0
+
+[models.claude-opus-4-6]
+max_tokens = 8192
+# Opus 4.6+ 支持 thinking.type = "adaptive"，自动决定 budget
+[models.claude-opus-4-6.thinking]
+type = "adaptive"
+
+[models.claude-fable-5]
+# ⚠️ 严格模型：temperature / top_p / top_k 都受限制
+max_tokens = 8192
+temperature = 1.0              # 仅接受 1
+# top_p = 1.0                  # 仅接受 1（不要写非 1）
+# top_k 必须省略

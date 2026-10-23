@@ -12,11 +12,17 @@ import sys
 from typing import NoReturn
 
 import donkey.core.api as core_api
-from donkey.core.exceptions import PathNotFoundError, PathPermissionError, WorkspaceInitError
+from donkey.core.exceptions import (
+    PathNotFoundError,
+    PathPermissionError,
+    TemplateGenerationError,
+    WorkspaceInitError,
+)
 from donkey.core.exit_codes import (
     EXIT_CODE_OK,
     EXIT_CODE_PATH_NOT_FOUND,
     EXIT_CODE_PATH_PERMISSION,
+    EXIT_CODE_TEMPLATE_GENERATION,
 )
 
 #: 异常 → 退出码的**全局唯一映射表**（contracts/exit-codes.md §3）。
@@ -26,6 +32,7 @@ from donkey.core.exit_codes import (
 _EXCEPTION_TO_EXIT_CODE: dict[type[Exception], int] = {
     PathNotFoundError: EXIT_CODE_PATH_NOT_FOUND,
     PathPermissionError: EXIT_CODE_PATH_PERMISSION,
+    TemplateGenerationError: EXIT_CODE_TEMPLATE_GENERATION,
 }
 
 
@@ -63,8 +70,8 @@ def _build_parser() -> DonkeyArgumentParser:
 
     init_parser = subparsers.add_parser(
         "init",
-        help="创建 workspace 根目录（不加载模板清单、不生成模板内容）。",
-        description="创建 workspace 根目录（不加载模板清单、不生成模板内容）。",
+        help="创建 workspace：生成模板骨架（46 个模板条目）+ 工作区清单。",
+        description="创建 workspace：生成模板骨架（46 个模板条目）+ 工作区清单。",
     )
     init_parser.add_argument(
         "path",
@@ -73,7 +80,7 @@ def _build_parser() -> DonkeyArgumentParser:
     init_parser.add_argument(
         "--force",
         action="store_true",
-        help="强制重置已存在模板文件；本阶段仅记录并回显，不触发任何删除 / 重置。",
+        help="恢复出厂设置：模板文件与三个记忆库模板被删后重建，记忆库历史与元数据一并清空。",
     )
     return parser
 
@@ -104,6 +111,19 @@ def _run_init(path: str, force: bool) -> int:
         f"force={str(result.force).lower()} templates={result.templates_loaded} "
         f"created={result.files_created} skipped={result.files_skipped}"
     )
+    if result.force:
+        # 强制重置会删掉重建三个记忆库模板 —— MUST 显式提示用户历史与元数据
+        # 一并清空（spec FR-068 / SC-019）。该提示属**成功路径**信息，故走
+        # stdout；MUST 与通用摘要**分行**、MUST NOT 挤占摘要的六个字段。
+        #
+        # 文案 MUST 同时涵盖"已清空 / 已重建"两种情形 —— 带 --force 时该提示
+        # **恒定输出**（即使工作区此前不存在 sqlite3 文件，此时亦无数据可清空，
+        # 属"已被重建"的形态）。
+        print(
+            "[donkey init] 警告：memory/ 下的三个记忆库文件已被清空并重建为出厂状态"
+            "（会话历史与会话元数据一并清空，--force 恢复出厂设置）。"
+            "如需保留请先备份。"
+        )
     return EXIT_CODE_OK
 
 

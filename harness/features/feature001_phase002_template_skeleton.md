@@ -286,7 +286,7 @@ def init_workspace(path: str | Path,
         workspace_path=abs_path,
         name=resolved_name,
         force=force,
-        templates_loaded=templates_loaded,  # = manifest 条目数（P1 阶段为 3，P2 完成后 18，P3 完成后 25）
+        templates_loaded=templates_loaded,  # = manifest 条目数（P1 阶段为 3，P2 完成后 46，P3 完成后 54）
         files_created=created,
         files_skipped=skipped,
     )
@@ -584,7 +584,7 @@ spec 必须列出每个文件的初始内容（建议长度 5–20 行）：
 }
 ```
 
-> **追加条数核对**：P2 追加 **43** 条 = 7 个文本模板（`skills/example/SKILL.md` / `README.md` / `tools/README.md` / `mcp/README.md` / `skills/README.md` / `memory/README.md` / `.gitignore`）+ **`providers/` 的 27 个模板（`providers/README.md` + 26 个 provider stub）** + 6 个目录条目（`tools` / `mcp` / `skills` / `skills/example` / `memory` / **`providers`**）+ 3 个 sqlite3 模板；叠加 P1 的 3 条 = **累计 46 条**。F001-P3 追加 7 条后累计 **53 条**（见 F001-P3 §4.7）。
+> **追加条数核对**：P2 追加 **43** 条 = 7 个文本模板（`skills/example/SKILL.md` / `README.md` / `tools/README.md` / `mcp/README.md` / `skills/README.md` / `memory/README.md` / `.gitignore`）+ **`providers/` 的 27 个模板（`providers/README.md` + 26 个 provider stub）** + 6 个目录条目（`tools` / `mcp` / `skills` / `skills/example` / `memory` / **`providers`**）+ 3 个 sqlite3 模板；叠加 P1 的 3 条 = **累计 46 条**。F001-P3 追加 8 条后累计 **54 条**（见 F001-P3 §4.7）。
 
 
 ### 4.9 单元测试（`tests/unit/test_template_skeleton.py`）
@@ -1076,6 +1076,49 @@ verify_phase_f001_p2.py 的 14 个 `test_*` 函数全部 PASS → F001-P2 完成
 - 具体实现步骤（如"先实现 render_templates 再实现 manifest.py"）—— plan 才规定顺序；
 - 测试用例的具体代码（除 §6 / §4.8 中已作为参考示例给出的）；
 - 依赖包版本号。
+
+---
+
+## 12. 实现落点回填（2026-10-23 · F001-P2 已交付）
+
+> 本节记录**实际落点**，供后续 Phase（F001-P3）与 F002 / F003 复用时定位代码；
+> 行为契约仍以 `specs/001-donkey-init-workspace/phase-2-template-skeleton/` 下的
+> spec / plan / contracts 为准，本节**不**复述契约。
+
+### 12.1 模块落点
+
+| 模块 | 落点 | 内容 |
+|---|---|---|
+| 模板清单加载 + 渲染 + 内部流水线 | `donkey/core/workspace/init.py` | 追加 `DEFAULT_TEMPLATES_ROOT` / `load_template_manifest` / `render_templates` / `init_workspace_inner`（P1 的 `check_path` / `check_permission` / `validate_init_request` **未改动**） |
+| 工作区清单（D-01） | `donkey/core/workspace/manifest.py` | **新增模块**：`WORKSPACE_MANIFEST_FILENAME` / `write_workspace_manifest` / `read_workspace_manifest` / `ensure_workspace_manifest`（F002 / F003 复用读取能力） |
+| sqlite3 结构构造器 | `donkey/core/workspace/sqlite3_templates.py` | **新增模块**：`build_sessions_sqlite` / `build_store_sqlite` / `build_knowledge_sqlite`（上游 saver 的 import **只**出现在本模块） |
+| 异常类 + 模板类失败的下一步文案 | `donkey/core/exceptions.py` | 追加 `TemplateGenerationError` + `_NEXT_STEP_TEMPLATE`（与错误类同模块，避免 `core/workspace/` 内循环 import） |
+| 退出码常量 | `donkey/core/exit_codes.py` | `EXIT_CODE_TEMPLATE_GENERATION = 3` 由「建档」转为「**启用**」；`4` 仍标注 P3 预留 |
+| 核心库门面 | `donkey/core/api.py` | `init_workspace` 函数体替换为「调 `init_workspace_inner` + 构造 `InitResult`」；`InitResult` 字段集合 / 顺序 / 类型**未改动** |
+| 客户端 | `donkey/cli/cli_client.py` | 改动共 **3 项**：异常映射表 +1 行 · 摘要追加 1 行强制清空提示 · `--help` / 子命令说明文案同步 |
+
+### 12.2 模板资产落点
+
+- 模板清单：`donkey/core/workspace/templates/manifest.json` —— **46 条**（P1 的 3 条逐字未动 + P2 末尾追加 43 条）；
+- 模板源：`donkey/core/workspace/templates/**.txt` —— **37 个**（3 个覆盖 P1 占位 + 34 个新增），**含隐藏名 `.gitignore.txt`**；
+- 打包：`pyproject.toml` 的 `[tool.setuptools.package-data]` **显式列入** `".gitignore.txt"`（setuptools 的 `glob(recursive=True)` 会过滤 `.` 开头的文件名，漏列则 wheel 缺该源 → 安装后 `donkey init` 报「模板源缺失」exit 3）；
+- 26 份 provider stub 由**脚本抽取**调研 §8.3.3 ~ §8.3.28 的 ```toml 围栏落盘（**不**手工誊写），模型条目合计 **51** 条。
+
+### 12.3 测试与门禁落点
+
+| 层 | 落点 | 规模 |
+|---|---|---|
+| 单元测试 | `tests/unit/test_template_skeleton.py` | **72** 个用例（FR-055 的 16 类 + 3 条边界护栏 + 5 条内容级断言 + 重复条目 / 缺省 format 等补充类别 + **spec Edge Cases 段的 16 条 MUST 边界**） |
+| 单元测试（客户端） | `tests/unit/test_cli_client.py` | 新增 **1** 个（强制清空提示行） |
+| 黑盒验收 | `tests/e2e/phase/verify_phase_f001_p2.py` | **14** 个 `test_scenario_*` 场景断言（MUST NOT import `donkey.*` 业务代码） |
+| 静态检查 | `ruff check donkey/ tests/` + `mypy donkey/ tests/` | 零 error 零 warning |
+| 覆盖率 | `pytest tests/unit/ --cov=donkey.core --cov-fail-under=80` | `donkey.core` 行覆盖率 **92%**（覆盖率 MUST NOT 写入 pytest 全局 `addopts`） |
+
+### 12.4 后续 Phase 的接入点
+
+- **F001-P3（`builtin_tools`）**：在 `templates/manifest.json` 末尾追加 8 条（3 个内置 `@tool` + `tools/__init__.py` + 示例 Skill 的 Level 3 资源），清单累计 **54** 条；`format: "python"` 已在渲染引擎中支持，本 Phase 零条目使用；
+- **F002 / F003**：复用 `core/workspace/manifest.py` 的读取能力；`memory/sessions.sqlite3` 的结构健康检查属 F002-P2（`SqliteSchemaError` exit 16），本 Phase 只保证出厂态 5 项断言全部满足；
+- **仓库级 CI**：`.github/workflows/ci.yml` 仍 Deferred —— 临时例外 E-01 的范围已于 2026-10-23 扩展至「仅 F001-P1 与 F001-P2」（过期时间「F001-P3 结束前」不变，见宪法 §6.3）。
 
 ---
 

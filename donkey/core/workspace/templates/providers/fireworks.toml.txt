@@ -1,0 +1,24 @@
+# =============================================================================
+# providers/fireworks.toml —— Fireworks AI（多模型推理平台）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "fireworks" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+# 走专用 `ChatFireworks` 类（langchain-fireworks）。Fireworks 部署 100+ 开源模型。
+
+api_key = ""
+api_host = ""                 # 默认 "https://api.fireworks.ai/inference/v1"
+timeout = 60
+max_retries = 6
+temperature = 0.7
+max_tokens = 4096
+
+[models."accounts/fireworks/models/llama-v3p3-70b-instruct"]
+max_tokens = 4096

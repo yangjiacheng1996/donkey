@@ -1,0 +1,32 @@
+# =============================================================================
+# providers/openai-compatible.toml —— OpenAI Compatible 通用元 provider
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "openai-compatible" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+# 鉴权密钥。必填。第三方 OpenAI 兼容服务的 API key。
+api_key = ""
+
+# 自定义 API 端点。**必填**（与其它 provider 不同，openai-compatible 必须填 api_host）。
+# 类型：str (URL)
+# 示例：https://openrouter.ai/api/v1 / https://api.together.xyz/v1
+#       https://your-internal-llm.company.com/v1
+api_host = ""
+
+# 服务名（仅用于日志 / UI 展示，不影响功能）
+service_name = "my-internal-llm"
+
+timeout = 60
+max_retries = 6
+temperature = 1.0
+max_tokens = 4096
+
+[models.custom-model-name]
+max_tokens = 4096

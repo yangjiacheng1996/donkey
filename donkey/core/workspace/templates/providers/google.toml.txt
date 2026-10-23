@@ -1,0 +1,42 @@
+# =============================================================================
+# providers/google.toml —— Google Gemini
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "google" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+# 鉴权密钥。必填。Google AI Studio API key（或 Vertex AI service account JSON）。
+# 类型：str
+api_key = ""
+
+# 自定义 API 端点。选填。
+# 默认："" → 解析层用 "https://generativelanguage.googleapis.com"
+api_host = ""
+
+timeout = 60
+max_retries = 6
+
+
+temperature = 1.0             # 范围：[0.0, 2.0]
+max_tokens = 8192
+top_p = 0.95
+top_k = 40                    # Google 专属
+# Google 专属：思考模式。选填。默认 disabled。
+# 类型：table
+[thinking_config]
+include_thoughts = false
+thinking_budget = 0           # 0 = disabled
+
+[models.gemini-2.0-flash]
+temperature = 1.0
+max_tokens = 8192
+
+[models.gemini-2.0-pro]
+max_tokens = 8192
+thinking_budget = 10000       # 此 model 默认开启 thinking

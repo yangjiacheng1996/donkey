@@ -276,7 +276,12 @@ def test_scenario_4_idempotent_no_force(tmp_path: Path) -> None:
 
 
 def test_scenario_5_force_no_reset_yet(tmp_path: Path) -> None:
-    """场景 5：``--force`` 被记录并回显，但本阶段不重置、不删除任何内容。"""
+    """场景 5：``--force`` 被记录并回显，且**清单外**的已有内容不被删除或覆盖。
+
+    P1 的 FR-028「本阶段不触发任何重置」已被 F001-P2 的"恢复出厂设置"语义
+    取代（模板清单内的条目会被重建）；P1 的**持久**不变量 —— 清单外的用户内容
+    零改动 —— 仍 MUST 成立（spec FR-013）。
+    """
     argv, cwd = _resolve_donkey_command()
 
     ws = tmp_path / "ws"
@@ -291,14 +296,19 @@ def test_scenario_5_force_no_reset_yet(tmp_path: Path) -> None:
         f"stdout={completed.stdout!r} stderr={completed.stderr!r}"
     )
     assert "force=true" in completed.stdout
-    # 已有内容未被删除或覆盖。
+    # 清单外的已有内容未被删除或覆盖。
     assert user_file.read_text(encoding="utf-8") == "user content"
     assert user_file.stat().st_mtime_ns == before_stat.st_mtime_ns
-    assert sorted(p.name for p in ws.iterdir()) == ["user.txt"]
+    assert user_file in list(ws.iterdir())
 
 
 def test_scenario_6_p1_no_template_rendering(tmp_path: Path) -> None:
-    """场景 6：范围边界 —— 只建根目录，不加载清单、不生成任何模板内容。"""
+    """场景 6：范围边界 —— F001-P2 起模板骨架被生成（清单条目数 > 0）。
+
+    P1 的 FR-029 / FR-025 第 6 项「本阶段不产出模板内容」已被 F001-P2 取代：
+    自本 Phase 起 ``donkey init`` MUST 落地模板骨架。本场景保留其**持久**部分
+    —— 命令成功结束、目标目录存在 —— 并追加 P2 的边界断言（模板条目已加载）。
+    """
     argv, cwd = _resolve_donkey_command()
 
     ws = tmp_path / "ws"
@@ -309,10 +319,12 @@ def test_scenario_6_p1_no_template_rendering(tmp_path: Path) -> None:
         f"stdout={completed.stdout!r} stderr={completed.stderr!r}"
     )
     assert ws.is_dir()
-    # 模板相关计数明确为 0（spec FR-020 / US6 场景 3）。
-    assert "templates=0 created=0 skipped=0" in completed.stdout
-    # 目标目录内 MUST 无任何文件（宪法 N-01：workspace 内不出现 Python 入口文件）。
-    assert list(ws.iterdir()) == []
+    # 模板清单已被加载（spec FR-026）。
+    assert "templates=" in completed.stdout
+    template_count = int(
+        completed.stdout.split("templates=")[1].split()[0]
+    )
+    assert template_count > 0
 
 
 def test_scenario_7_name_derived_from_path(tmp_path: Path) -> None:

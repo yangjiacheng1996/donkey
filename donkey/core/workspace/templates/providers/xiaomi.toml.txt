@@ -1,0 +1,32 @@
+# =============================================================================
+# providers/xiaomi.toml —— 小米 MiMo
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "xiaomi" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+# 多平台路由：
+#   - 自托管 → api_key 留空，api_host = "http://localhost:11434"（走 ollama 解析层）
+#   - OpenRouter → api_key = OpenRouter key, api_host = "https://openrouter.ai/api/v1"
+#   - 官方 → api_key + 官方 api_host
+api_key = ""
+api_host = ""                 # 取决于平台
+timeout = 60
+max_retries = 6
+temperature = 0.7
+max_tokens = 4096
+
+[models.mimo-7b-rl]
+max_tokens = 4096
+
+
+# ⚠️ v1 暂不支持以下 provider（推迟 v2+）：
+#   [baidu]    百度文心 ERNIE（OAuth + 私有协议）→ 见 §3.5
+#   [iflytek]  科大讯飞星火（WebSocket + HMAC-SHA256）→ 见 §3.5
+#   [sensetime] 商汤日日新（私有 API）→ 见 §3.5

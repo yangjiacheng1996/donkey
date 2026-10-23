@@ -1,0 +1,30 @@
+# =============================================================================
+# providers/doubao.toml —— 字节豆包（火山引擎方舟，OpenAI 兼容）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "doubao" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+# 鉴权密钥。必填。火山引擎方舟 API key。
+api_key = ""
+
+# 自定义 API 端点。选填。
+# 默认："" → 解析层用 "https://ark.cn-beijing.volces.com/api/v3"
+api_host = ""
+
+timeout = 60
+max_retries = 6
+temperature = 1.0
+max_tokens = 4096
+
+[models.doubao-pro-32k]
+max_tokens = 32768
+
+[models.doubao-lite-32k]
+max_tokens = 32768

@@ -1,0 +1,47 @@
+# =============================================================================
+# providers/qwen.toml —— 阿里通义千问（OpenAI 兼容）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "qwen" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+# 鉴权密钥。必填。阿里云百炼 / DashScope API key。
+api_key = ""
+
+# 自定义 API 端点。选填。
+# 默认："" → 解析层用 "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_host = ""
+
+timeout = 60
+max_retries = 6
+temperature = 1.0
+max_tokens = 4096
+
+# 通义专属：搜索增强。选填。
+enable_search = false
+
+# thinking 控制的 per-provider 默认值
+# 选填；donkey 应用层分派 Qwen Provider 类时作辅助判断：
+# - "qwq"/"reasoner" 后缀的模型 → 走 ChatQwQ（QwenThinkingProvider，思考强制开启）
+# - 其它模型（如 qwen-max / qwen-plus）→ 走 ChatQwen（QwenGeneralThinkingProvider）
+default_thinking = "auto"     # "auto" | "enabled" | "disabled"
+
+[models.qwen-max]
+max_tokens = 8192
+
+[models.qwen-vl-max]
+# 多模态
+max_tokens = 4096
+
+# QwQ 推理模型专用 entries（让用户显式声明这些模型走 ChatQwQ）
+[models.qwq-32b-preview]
+max_tokens = 32768
+
+[models.qwq-plus]
+max_tokens = 32768

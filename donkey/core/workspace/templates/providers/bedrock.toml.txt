@@ -1,0 +1,60 @@
+# =============================================================================
+# providers/bedrock.toml —— AWS Bedrock（多模型聚合；走 ChatBedrock）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "bedrock" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+# 注：走专用 `ChatBedrock` 类（langchain-aws）。Bedrock 是元 provider，
+# 通过 model_provider 字段聚合 Claude / Llama / Mistral / Titan 等模型。
+
+# 采用独立 aws_* 字段 + boto3.Session 显式构造：通过三个独立字段
+# aws_access_key_id / aws_secret_access_key / aws_region 显式传给 boto3.Session(...)。
+# 构造 Session 时**不会读 env var 和 ~/.aws/credentials**，与 §9.1 立场完全对齐。
+# AWS_SESSION_TOKEN 是可选的（IAM 临时凭证场景）。
+
+# AWS IAM access key。必填。
+# 类型：str
+# 默认："" → 解析层抛 BedrockCredentialsMissingError（exit 18）
+aws_access_key_id = ""
+
+# AWS IAM secret access key。必填。
+# 类型：str
+aws_secret_access_key = ""
+
+# AWS region。必填。
+# 类型：str (e.g. "us-east-1" | "eu-west-2")
+# 出厂态为空串 —— 凭据由用户自负（宪法 §3.5）。
+aws_region = ""
+
+# AWS session token（IAM 临时凭证专用）。选填。
+# 类型：str
+# 默认："" → 不传（走长期凭证）
+aws_session_token = ""
+
+# Bedrock 模型路由：必须填具体 Claude / Llama / Titan 模型 ID
+# 例：model = "us.anthropic.claude-sonnet-4-6" 或 "meta.llama3-70b-instruct-v1:0"
+#
+# ⚠️ 若 models 子表用**带 "." 的真实 model_id**（如
+#    "us.anthropic.claude-sonnet-4-6"），TOML 裸 key 不允许含 "."，
+#    必须加引号 → [models."us.anthropic.claude-sonnet-4-6"]
+#    否则会被解析成嵌套表（us → anthropic → claude-sonnet-4-6），模型表静默损坏。
+#    （下例用短别名规避该问题——两种写法都可以，但**不要混用**。）
+
+timeout = 60
+max_retries = 6
+temperature = 1.0
+max_tokens = 4096
+
+[models.claude-sonnet-4-6]
+# Bedrock 上的 Claude（与 anthropic 节不同的鉴权路径）
+max_tokens = 4096
+
+[models.llama-3.1-70b-instruct]
+max_tokens = 4096

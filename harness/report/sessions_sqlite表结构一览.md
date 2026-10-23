@@ -95,7 +95,7 @@ def build_sessions_sqlite(path: Path) -> None:
     """构造 sessions.sqlite3 schema-built 空文件（F001-P2 §4.7.6）。
 
     失败归类：统一抛 TemplateGenerationError (exit 3)——
-    模板清单损坏 / schema 非法 / 源缺失 / 渲染失败 / 文件写入失败 / sqlite3 schema 构造失败 五合并一（奥卡姆）。
+    模板清单损坏 / schema 非法 / 源缺失 / 渲染失败 / 文件写入失败 / sqlite3 schema 构造失败 / 上游 saver 不可用 / 目标路径是目录 —— 统一归退出码 3（奥卡姆合并；权威 **7 类**分类法见 F001-P2 spec『模板生成类失败的 7 类成因（权威分类法）』）。
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
@@ -134,7 +134,7 @@ def build_sessions_sqlite(path: Path) -> None:
 
 > ⚠️ **API 注意**：`SqliteSaver.setup()` 是**实例方法**（`def setup(self) -> None`，内部用 `self.conn.executescript(...)`），**不是**接受 conn 的 classmethod / staticmethod——因此正确写法是 `SqliteSaver(conn).setup()`，**不是** `SqliteSaver.setup(conn)`（后者会因 `self` 绑定错误而抛 `AttributeError`）。`langgraph-checkpoint-sqlite` 3.x 源码实证。
 
-**verify 锚点**：`tests/e2e/phase/verify_phase_f001_p2.py::test_scenario_15_sqlite3_templates_with_schema` 含完整 PRAGMA 断言（表存在性 + 字段名 + 索引名 + 空数据）。
+**verify 锚点**：`tests/e2e/phase/verify_phase_f001_p2.py::test_scenario_14_sqlite3_templates_with_schema` 含完整 PRAGMA 断言（表存在性 + 字段名 + 索引名 + 空数据）。
 
 ---
 

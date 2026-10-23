@@ -1,0 +1,40 @@
+# =============================================================================
+# providers/meta.toml —— Meta Llama（多平台路由）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "meta" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+# 鉴权密钥。取决于平台。
+#   - 自托管（Ollama）：留空
+#   - 第三方（Replicate / Together / Fireworks）：填对应 key
+api_key = ""
+
+# 自定义 API 端点。**必填**。
+#   - 自托管：http://localhost:11434
+#   - Replicate：https://api.replicate.com/v1
+#   - Together：https://api.together.xyz/v1
+#   - Fireworks：https://api.fireworks.ai/inference/v1
+api_host = ""
+
+# Meta 专属：路由平台。选填。决定解析层用哪个。
+# 类型：str
+# 取值：ollama | replicate | together | fireworks | baseten
+routing_platform = "ollama"
+
+timeout = 60
+max_retries = 6
+temperature = 0.7
+max_tokens = 4096
+
+[models.llama-3.1-70b-instruct]
+max_tokens = 4096
+
+[models.llama-3.1-405b-instruct]
+max_tokens = 8192

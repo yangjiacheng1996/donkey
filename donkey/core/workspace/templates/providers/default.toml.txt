@@ -1,5 +1,11 @@
-# providers/default.toml —— 默认 provider 配置的源文件占位
-# （F001-P1 只建档、不加载、不渲染）
+# providers/default.toml —— {{ workspace_name }} 的供应商全局默认配置
+#
+# 字段契约：
+#   default_provider MUST 指向同目录下的 providers/<provider_id>.toml，
+#     且该文件 MUST 处于启用态（enabled = true）—— 禁用态不能当默认。
+#   default_model MUST 存在于该 provider 文件的 [models] 表中。
+#
+# 本文件 MUST NOT 含任何凭据；出厂态两个字段均为空串。
 
-default_provider = "{{default_provider}}"
-default_model = "{{default_model}}"
+default_provider = ""
+default_model = ""

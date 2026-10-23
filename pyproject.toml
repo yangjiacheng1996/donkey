@@ -7,7 +7,13 @@ name = "donkey"
 version = "0.1.0"
 description = "donkey —— 面向个人开发者的 workspace 与 agent 运行框架"
 requires-python = ">=3.11"
-dependencies = []
+# donkey has exactly ONE runtime dependency (spec SC-021 / FR-067): the upstream
+# saver package that owns the ``checkpoints`` / ``writes`` tables of the short-term
+# memory DB. The lower bound MUST be ``>=3.1`` — only that range resolves
+# ``langgraph-checkpoint>=4.3.0``; the known-bad combination
+# ``langgraph-checkpoint-sqlite 3.1.1`` + ``langgraph-checkpoint 4.2.0`` raises
+# ``ImportError: cannot import name 'writes_sort_key'`` on import.
+dependencies = ["langgraph-checkpoint-sqlite>=3.1,<4"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "pytest-cov", "ruff", "mypy"]
@@ -20,7 +26,12 @@ include = ["donkey*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-"donkey.core.workspace.templates" = ["**/*.txt", "**/*.json"]
+# ".gitignore.txt" MUST be listed explicitly — setuptools resolves package-data
+# with ``glob(recursive=True)``, which filters out file NAMES starting with "."
+# (the template source for the workspace's ``.gitignore`` entry). Omitting it
+# keeps that source out of built wheels/sdists → "donkey init" then fails with
+# exit 3 ("template source missing") on non-editable installs.
+"donkey.core.workspace.templates" = ["**/*.txt", "**/*.json", ".gitignore.txt"]
 
 [tool.ruff]
 line-length = 100

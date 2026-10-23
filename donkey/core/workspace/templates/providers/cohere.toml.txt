@@ -1,0 +1,24 @@
+# =============================================================================
+# providers/cohere.toml —— Cohere（Command R 系列，企业 RAG 强项）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "cohere" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+# 走专用 `ChatCohere` 类（langchain-cohere）。
+
+api_key = ""
+api_host = ""                 # 默认 "https://api.cohere.com"
+timeout = 60
+max_retries = 6
+temperature = 0.3
+max_tokens = 4096
+
+[models.command-r-plus]
+max_tokens = 4096

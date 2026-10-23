@@ -213,7 +213,7 @@ class BuiltinToolGenerationError(WorkspaceInitError):
 >
 > **标题生成契约（N-10）**：`session new` 的标题**必须在 `new_session` 内、落库前定稿**——用户显式 `--title` → 用它；给了 `--first-prompt` → 调 LLM 总结 ≤ 20 字（超时 ≤ 5s），**总结失败 / 超时 / 空返回 → 回退为首轮 prompt 的前 20 字**（**绝不**回退成"无标题会话"）；两者都不给 → 默认"无标题会话"。因此**标题总结失败不产生任何 exit code**（session 创建始终成功，exit 0）——exit 25 改绑给 `SessionNewCheckpointError`（SqliteSaver 写 initial checkpoint 失败）。详见立项书 §5.5.4.5。
 
-`memory/sessions.sqlite3` 文件**同时承载两套表**（与 SqliteSaver 同文件共存，详见 §4.1.1 "memory/ 模板边界"）：
+`memory/sessions.sqlite3` 文件**同时承载三张表与两个索引**（与 SqliteSaver 同文件共存，详见 §4.1.1 "memory/ 模板边界"）：
 - **SqliteSaver 自有表**（`checkpoints` / `writes`）—— 短期 message 历史；`thread_id` 即 SqliteSaver 主键；schema 由 `langgraph-checkpoint-sqlite` 包管理；
 - **`sessions_metadata` 表**（donkey 自管，**`donkey init` 阶段作为模板预创建**，含 `idx_sessions_metadata_title` / `idx_sessions_metadata_updated_at` 索引）—— 会话元数据（`thread_id` ↔ `title` 映射、`created_at` / `updated_at` / `donkey_version` / `first_prompt`）；donkey 用户的 `list` / `remove` / `--title` 全部走此表，**不**用 SqliteSaver 状态反推。
 
@@ -411,17 +411,17 @@ templates/
 └── .gitignore                  ← 模板（已含 `memory/*.sqlite3`）
 ```
 
-> **manifest 分阶段追加（v1 baseline = 53 条）**：模板清单**不一次性预列全部路径**，而是随各 Phase 逐段追加——**保证"清单里的每一条都已有对应的模板源 .txt"**（否则 P2 的 `render_templates` 会因源缺失抛 exit 3）：
+> **manifest 分阶段追加（v1 baseline = 54 条）**：模板清单**不一次性预列全部路径**，而是随各 Phase 逐段追加——**保证"清单里的每一条都已有对应的模板源 .txt"**（否则 P2 的 `render_templates` 会因源缺失抛 exit 3）：
 >
 > | 阶段 | 追加条数 | 累计 | 内容 |
 > |---|---|---|---|
 > | **F001-P1** | 3 | 3 | `instruction.md` / `providers/default.toml` / `mcp/mcp.json`（与 P1 已就位的 3 个 .txt 占位一一对应；**P1 只建档清单（3 条），不加载、不解析、不渲染**） |
 > | **F001-P2** | +43 | 46 | 其余 7 个文本模板 + 6 个目录条目（`tools/` `mcp/` `skills/` `skills/example/` `memory/` **`providers/`**）+ 3 个 sqlite3 模板 + **`providers/README.md` + 26 个 provider stub（`providers/<id>.toml`）** |
-> | **F001-P3** | +7 | 53 | `tools/__init__.py` + 3 个内置 tool + 3 个 Skills Level 3 示例 |
+> | **F001-P3** | +8 | 54 | `tools/__init__.py` + **`tools/changes.py`（变更记录契约库，diff-ready 地基）** + 3 个内置 tool + 3 个 Skills Level 3 示例 |
 >
 > **包内 `templates/manifest.json` ≠ workspace 根的 `manifest.json`**：前者是**模板文件清单**（装在 donkey 包内，驱动 `render_templates` 幂等渲染）；后者是 **D-01 的 workspace manifest**（落在 `<workspace>/manifest.json`，含 `version` / `name` / `created_at` / `donkey_version` 4 字段，由 `core/workspace/manifest.py` 单独写入，**不**进模板清单）。
 
-> **文本模板 vs sqlite3 模板**：`templates/` 下文本类模板（`*.md` / `*.toml` / `*.json` / `*.py`）以文本源码形式随包分发；sqlite3 类模板（`memory/*.sqlite3`）由 `core/workspace/init.py` 在 `donkey init` 阶段**程序化构造**：
+> **文本模板 vs sqlite3 模板**：`templates/` 下文本类模板（`*.md` / `*.toml` / `*.json` / `*.py`）以文本源码形式随包分发；sqlite3 类模板（`memory/*.sqlite3`）由 `core/workspace/sqlite3_templates.py` 在 `donkey init` 阶段**程序化构造**：
 >
 > - `sessions.sqlite3` → 调 `SqliteSaver(conn).setup()`（**实例方法**）创建 SqliteSaver 自身 `checkpoints` / `writes` 表 + donkey 自管 `sessions_metadata` 表（6 字段）+ 2 索引（schema 在 v1 就绪）；
 > - `store.sqlite3` → **v1 仅触发空 sqlite3 文件创建**，schema 全部推迟到 v3 SqliteStore 实施时（详见 F001-P2 §4.7.6 + `sessions_sqlite表结构一览.md` §3 + 立项书 §4.10 TD-02 路线图步骤 1）；
@@ -432,7 +432,7 @@ templates/
 > **memory/ 模板边界**（关键 design intent——`--force` 等于"恢复出厂设置"，sqlite3 文件是模板而非保留型运行数据；该边界是 §4.4 F001-P2 测试 14 / 15 的设定依据）：
 >
 > - `memory/` 目录 + `memory/README.md` + `memory/sessions.sqlite3` + `memory/store.sqlite3` + `memory/knowledge.sqlite3` **全部纳入 `templates/manifest.json` 模板清单**，由 `donkey init` 阶段统一预创建；
-> - **三个 sqlite3 模板的程序化构造**（`core/workspace/init.py::render_templates` 内调用 schema builder，**不**在包内携带二进制模板文件——避免 schema 与代码漂移）：
+> - **三个 sqlite3 模板的程序化构造**（`core/workspace/sqlite3_templates.py` 内定义 schema builder，由 `core/workspace/init.py::render_templates` 按条目 `format` 分派调用，**不**在包内携带二进制模板文件——避免 schema 与代码漂移）：
 >   - `memory/sessions.sqlite3`：连接 sqlite3 → 构造 `SqliteSaver(conn)` 并调 `saver.setup()` 创建 `checkpoints` / `writes` 表 → `CREATE TABLE IF NOT EXISTS sessions_metadata (thread_id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, donkey_version TEXT NOT NULL, first_prompt TEXT)` + `CREATE INDEX idx_sessions_metadata_title` + `CREATE INDEX idx_sessions_metadata_updated_at`；
 >   - `memory/store.sqlite3`：连接 sqlite3 **仅触发空文件创建**——**不**建任何表 / 索引；schema 全部推迟到 v3 SqliteStore 实施时（届时 Maintainer 修改 F001-P2 §4.7.6 + `harness/report/sessions_sqlite表结构一览.md` §3 + 立项书 §4.10 TD-02 路线图后追加 `store_items` 等建表 SQL）；
 >   - `memory/knowledge.sqlite3`：连接 sqlite3 创建空文件，**不**预设 schema——向量引擎（sqlite-vec / faiss+sqlite）选型待 v3+ 决定后再正式化；该文件占位让 workspace zip 备份结构稳定；
@@ -463,7 +463,7 @@ templates/
 |---|---|---|---|---|
 | **F001-P1** | `feature001_phase001_cli_validation.md` | `1-2` | CLI 入口 + 路径 / 权限校验 + 创建 workspace 根目录（**不加载模板清单**——推迟到 P2） | `PathNotFoundError` / `PathPermissionError` |
 | **F001-P2** | `feature001_phase002_template_skeleton.md` | `3` | 幂等生成模板骨架（补齐缺失 / `--force` 重置）+ 模板清单驱动（追加 43 条 → 累计 46 条） | `TemplateGenerationError` |
-| **F001-P3** | `feature001_phase003_builtin_tools.md` | `4` | 幂等生成 3 个内置 `@tool` + Skills example 三层（追加 7 条 → 累计 53 条） | `BuiltinToolGenerationError` |
+| **F001-P3** | `feature001_phase003_builtin_tools.md` | `4` | 幂等生成 3 个内置 `@tool` + **`tools/changes.py` 变更记录契约库（diff-ready）** + Skills example 三层（追加 8 条 → 累计 54 条） | `BuiltinToolGenerationError` |
 
 ### §4.3 F001-P1 = `cli_validation`（exit 1-2）
 
@@ -473,7 +473,7 @@ templates/
 - `donkey/core/` / `donkey/cli/` / `donkey/web/` / `donkey/gui/` 目录已创建；
 - `donkey/core/exit_codes.py` 已实现 exit code 段位常量；
 - `donkey/core/exceptions.py` 已定义基类 `DonkeyError` 与 F001 基类 `WorkspaceInitError`，并定义 2 个具体异常类（`PathNotFoundError` / `PathPermissionError`，对应 exit 1 / 2）；
-- `core/workspace/templates/manifest.json`（模板清单）已定义——**P1 阶段仅 3 条 entry**（`instruction.md` / `providers/default.toml` / `mcp/mcp.json`）；清单**分阶段追加**（P1 3 → P2 +43 = 46 → P3 +7 = 53），保证每条 entry 都有对应源文件；
+- `core/workspace/templates/manifest.json`（模板清单）已定义——**P1 阶段仅 3 条 entry**（`instruction.md` / `providers/default.toml` / `mcp/mcp.json`）；清单**分阶段追加**（P1 3 → P2 +43 = 46 → P3 +8 = 54），保证每条 entry 都有对应源文件；
 - `core/workspace/templates/{entry['path']}.txt`（模板源文件，P1 阶段至少含 `instruction.md.txt` / `providers/default.toml.txt` / `mcp/mcp.json.txt`）已就位。
 
 **实现要点**：
@@ -510,6 +510,7 @@ templates/
 - 不挂载任何中间件（属于 F004 run 域）；
 - 不解析 `providers/` 下的任何 TOML（属于 F002 load 域）；
 - **不**交付 `.github/workflows/ci.yml`（C1 工作流文件 Deferred——属仓库级资产，非单 Phase 交付物；已按宪法 §6.3 登记临时例外 E-01，替代保障为 plan G5 记录的 CI 最小内容骨架 + 本地命令清单作为完成证据，最迟于 F001-P3 结束前交付）。
+  > **E-01 范围扩展（2026-10-23，Maintainer 批准）**：原登记范围「仅 F001-P1」→ 扩展为「**仅 F001-P1 与 F001-P2**」（F001-P2 引入第一个运行期依赖与 14 个黑盒验收场景，测试面进一步扩大，CI 文件仍属仓库级资产）。本次扩展**不改变**过期时间（F001-P3 结束前）、**不改变**替代保障清单、**不新增**任何豁免条款。权威文本见宪法 §6.3 E-01。
 
 ---
 
@@ -537,7 +538,7 @@ templates/
 
   > `memory/README.md` 模板正文（`core/workspace/templates/memory/README.md.txt`）见 **F001-P2 §4.7.5**（唯一权威源，避免两处漂移）。
 - `core/workspace/templates/`：模板源文件（`.md.txt` / `.toml.txt` / `.json.txt`）；
-- `core/workspace/templates/manifest.json`：模板清单（列出 donkey 自动生成的所有文件路径；详见 §4.1.1）——含**文本模板**（`instruction.md` / `providers/*.toml` / `mcp/mcp.json` / `tools/*.py` 等）与 **sqlite3 模板**（`memory/sessions.sqlite3` / `memory/store.sqlite3` / `memory/knowledge.sqlite3`，由 `core/workspace/init.py` 在 init 阶段程序化构造；**不**在包内携带二进制 sqlite3 文件，避免 schema 漂移）；
+- `core/workspace/templates/manifest.json`：模板清单（列出 donkey 自动生成的所有文件路径；详见 §4.1.1）——含**文本模板**（`instruction.md` / `providers/*.toml` / `mcp/mcp.json` / `tools/*.py` 等）与 **sqlite3 模板**（`memory/sessions.sqlite3` / `memory/store.sqlite3` / `memory/knowledge.sqlite3`，由 `core/workspace/sqlite3_templates.py` 的 schema builder 在 init 阶段程序化构造；**不**在包内携带二进制 sqlite3 文件，避免 schema 漂移）；
 - `core/workspace/init.py`：新增 `render_templates(path, name, force)` 函数：
   - 遍历 `manifest.json` 中的每个模板路径（含文本模板 + sqlite3 模板）；
   - **不传 `force`**：仅当文件不存在时创建；已存在跳过；
@@ -576,6 +577,28 @@ templates/
 - 不生成 Skills example 的 Level 2/3 内容（推迟到 P3）；
 - **不**做"init 后跑 F002 静态检查"——文件格式合法性属于 F002 静态检查范畴（exit 11-14），F001 不重复。
 
+**落地状态（2026-10-23 · F001-P2 已交付）**：
+
+| 项 | 落点 | 状态 |
+|---|---|---|
+| 运行期依赖 | `pyproject.toml` → `dependencies = ["langgraph-checkpoint-sqlite>=3.1,<4"]`（**恰为 1 个**直接运行期依赖） | ✅ |
+| 错误类 | `core/exceptions.py` → `TemplateGenerationError(WorkspaceInitError)` + `_NEXT_STEP_TEMPLATE` | ✅ |
+| 退出码 | `core/exit_codes.py` → `EXIT_CODE_TEMPLATE_GENERATION = 3` **本阶段启用**；`4`（P3）与 `5-10` 仍不触发 | ✅ |
+| 客户端映射 | `cli/cli_client.py` → `_EXCEPTION_TO_EXIT_CODE` 追加 `TemplateGenerationError: 3`（**客户端改动共 3 项**：映射 1 行 + 强制清空提示 1 行 + `--help` 文案同步） | ✅ |
+| 模板清单加载 | `core/workspace/init.py` → `load_template_manifest`（**未去重**的原始条目列表；schema 校验 V1~V6） | ✅ |
+| 渲染内核 | `core/workspace/init.py` → `render_templates`（按**唯一路径**去重、后者胜出；幂等三态；父目录先建 → 顺序无关） | ✅ |
+| 内部流水线 | `core/workspace/init.py` → `init_workspace_inner`（五步：校验 → 加载清单 → 建根目录 → 渲染 → 写工作区清单；步骤 ⑤ 失败**不回滚**） | ✅ |
+| 工作区清单 | `core/workspace/manifest.py`（**新增模块**）→ `write` / `read` / `ensure`（字段恰 4 项；`ensure` 与 `write` 严格等价） | ✅ |
+| sqlite3 构造器 | `core/workspace/sqlite3_templates.py`（**新增模块**）→ `build_sessions_sqlite` / `build_store_sqlite` / `build_knowledge_sqlite` | ✅ |
+| 模板资产 | `core/workspace/templates/` → **46 条清单**（P1 的 3 条 + P2 追加 43 条）+ **37 个文本模板源**（含隐藏名 `.gitignore.txt`）；`package-data` 显式列入 `.gitignore.txt` → wheel 内齐备 | ✅ |
+| 供应商配置 | 26 份 provider stub（**脚本抽取**调研 §8.3.3~§8.3.28，逐字保留注释）+ `providers/README.md`（26 家索引）+ `providers/default.toml`（两字段出厂为空串） | ✅ |
+| 单元测试 | `tests/unit/test_template_skeleton.py`（**72** 个用例，覆盖 FR-055 的 16 类 + 边界护栏 + 内容级断言 + **spec Edge Cases 段的全部 MUST 边界**）+ `tests/unit/test_cli_client.py`（新增 1 个强制清空提示行用例） | ✅ |
+| 黑盒验收 | `tests/e2e/phase/verify_phase_f001_p2.py`（**14** 个 `test_scenario_*` 场景断言，全绿） | ✅ |
+| 静态检查 | `ruff check donkey/ tests/` + `mypy donkey/ tests/` → 零 error 零 warning | ✅ |
+| 覆盖率 | `pytest tests/unit/ --cov=donkey.core --cov-fail-under=80` → `donkey.core` 行覆盖率 **92%** | ✅ |
+
+**本阶段实际使用的退出码**（SC-010）：`{0, 1, 2, 3}` —— `1` = 输入 / 路径 / 参数用法不合法；`2` = 权限不足（前置校验阶段 + 工作区根目录创建阶段）；`3` = 模板骨架生成失败（渲染阶段 + 工作区清单写入阶段）。
+
 ---
 
 ### §4.5 F001-P3 = `builtin_tools`（exit 4）
@@ -584,12 +607,14 @@ templates/
 
 **实现要点**：
 - **`tools/__init__.py`**：空文件或最小初始化（保证 `from tools import filesystem` 可用）。
+- **`tools/changes.py`**：**变更记录契约库**（**0 个 `@tool`**，纯 stdlib）——原子写 + sha256 + unified diff + 乐观锁的**唯一产地**；所有改文件的工具（含用户自写工具）都 import 它，产出**统一 schema** 的"变更记录"（`CHANGE_RECORD_VERSION = 1`）。**这是 v4"diff 展示"（立项书 §1.5.3）的接入面**：材料层交出变更原材料，引擎层负责渲染 diff / 人工确认 / 回滚（v1 不承诺 diff 审阅，AC-5）。详见 F001-P3 §2.9。
 - **`tools/filesystem.py`**：7 个 `@tool`（**立项书 §4.6.1 + 调研 §三**）：
-  - `read_file(path) -> str` / `write_file(path, content)` / `copy_file(src, dst)` / `move_file(src, dst)` / `delete_file(path)` / `list_dir(path) -> list[str]` / `stat(path) -> dict`；
+  - `read_file(path, start_line=1, num_lines=None) -> str` / `write_file(path, content, dry_run=False, include_previous=False, expected_hash=None)` / `copy_file(src, dst)` / `move_file(src, dst)` / `delete_file(path, include_previous=False)` / `list_dir(path, include_hidden=True) -> list[str]` / `stat(path, with_hash=False) -> dict`；
   - 实现：`pathlib` / `shutil`；路径白名单由用户自管（donkey 不强制）；
+  - **写类工具一律返回 `change` 变更记录**（`action` / `previous_hash` / `new_hash` / `unified_diff` / `applied`）+ **原子写**（同目录临时文件 + `os.replace`）；新增参数**全部可选且带默认值**（旧调用方式逐字节不变 = 向后兼容）；
   - **不**含 `glob_search` / `grep_search`（由 `FilesystemFileSearchMiddleware` 接管，**宪法 §2.5**）。
 - **`tools/commandline.py`**：1 个 `@tool`：
-  - `run_shell(command, timeout=60) -> str`；
+  - `run_shell(command, timeout=60, cwd=None) -> str`（`cwd` 默认 = workspace 根，不依赖进程 cwd）；
   - 实现：`subprocess.run([...], shell=False, timeout=...)`，每次新进程，**不**走持久 shell（避免 HITL 冲突）。
 - **`tools/webfetch.py`**：1 个 `@tool`：
   - `fetch_url(url, method="GET", headers=None, timeout=30) -> str`；
@@ -599,7 +624,7 @@ templates/
   - Level 1：frontmatter `name` + `description`；
   - Level 2：Markdown 主体；
   - Level 3 目录占位：`skills/example/reference/` / `scripts/` / `templates/` 各含 1 个示例文件。
-- `core/workspace/templates/manifest.json` **追加**：把上述 7 条新 entry（tools/__init__.py + 3 个内置 tool + 3 个 Skills Level 3 示例）加入模板清单（P2 已有 instruction.md / `providers/` 等基础模板 + sqlite3 模板；P3 追加 builtin 模板条目）；
+- `core/workspace/templates/manifest.json` **追加**：把上述 8 条新 entry（tools/__init__.py + **`tools/changes.py`（变更记录契约库）** + 3 个内置 tool + 3 个 Skills Level 3 示例）加入模板清单（P2 已有 instruction.md / `providers/` 等基础模板 + sqlite3 模板；P3 追加 builtin 模板条目）；
 - `core/workspace/init.py`：**不重复实现** `render_templates`——P2 实现的 `render_templates` 已遍历 manifest.json **全量条目**实现幂等 + `--force`；本 Phase 仅**追加** manifest 条目，运行期 `donkey init` 调用 `render_templates` 时会自动覆盖本 Phase 加入的 builtin 工具条目。具体行为：
   - 不传 `force`：仅当文件不存在时创建；已存在跳过（用户自定义 `tools/*.py` 不在清单内，不动）；
   - 传 `force`：先 `delete` 再 `create`；sqlite3 模板也会被重建（见 §4.4 P2 实现要点 + §4.1.1 "memory/ 模板边界"）。

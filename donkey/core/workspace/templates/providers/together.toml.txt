@@ -1,0 +1,24 @@
+# =============================================================================
+# providers/together.toml —— Together AI（多模型推理平台）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "together" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+# 走专用 `ChatTogether` 类（langchain-together）。
+
+api_key = ""
+api_host = ""                 # 默认 "https://api.together.xyz/v1"
+timeout = 60
+max_retries = 6
+temperature = 0.7
+max_tokens = 4096
+
+[models."meta-llama/Llama-3".3-70B-Instruct-Turbo]
+max_tokens = 4096

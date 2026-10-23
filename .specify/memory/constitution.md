@@ -36,7 +36,7 @@
 | **N-09** | `donkey session` 的**对外标识是标题**，thread_id 仅作内部引用 | 立项书 §5.5.4 |
 | **N-10** | `donkey session new` 默认标题"无标题会话"；若给了首轮 prompt，**必须**在 `donkey.core.api.new_session` **内部**由 LLM 总结 ≤ 20 字标题并写回 sqlite3；**标题总结失败 / 超时时必须回退为首轮 prompt 的前 20 字**（**严禁**回退成"无标题会话"——不允许出现"Agent Loop 已启动但标题仍是占位符"的状态）；**严禁**实现为 `before_agent` 中间件（**不**进 Agent Loop 图，**不**新增 LangGraph 节点，**不**触发版本号 `x+1`） | 立项书 §5.5.4.5 |
 | **N-11** | v1 **必须**同时交付 cli / web / gui 三种客户端，缺一不可；任何客户端**不**允许出现"功能仅 cli 独有"的情况 | 立项书 §5.5.6 |
-| **N-12** | **禁止**使用任何 LangSmith 相关代码（包含但不**限于** `langsmith` 包 / LangSmith Cloud / Studio UI / Tracing / Deployment / Hub / `langchain[langsmith]` extras / `LANGSMITH_TRACING` 等环境变量）；**禁止**直接 `import langsmith` 或任何 langsmith.* 子包（包括用于诊断智能体的场景） | `harness/report/全开源最佳实践.md` §0 |
+| **N-12** | **禁止**使用任何 LangSmith 相关代码（包含但不**限于** `langsmith` 包 / LangSmith Cloud / Studio UI / Tracing / Deployment / Hub / `langchain[langsmith]` extras / `LANGSMITH_TRACING` 等环境变量）；**禁止**直接 `import langsmith` 或任何 langsmith.* 子包（包括用于诊断智能体的场景）。**边界（2026-10-23 澄清，见 [D-17]）**：本条的约束对象是 **donkey 自有代码路径**（`donkey.core` / `cli` / `web` / `gui`）的 **import 与使用**；第三方库的**传递依赖被安装到磁盘**不构成"使用"——但 MUST 在 plan 中显式登记，且 MUST 由门禁实证"donkey 永不 import"（不设 `LANGSMITH_*` 等环境变量） | `harness/report/全开源最佳实践.md` §0 |
 
 ---
 
@@ -167,11 +167,11 @@
 | 语言 | Python 3.11+ | LangChain / LangGraph 官方语言；`tomllib` 内置 |
 | Agent 框架 | LangChain 1.x `create_agent` | 直接返回编译图，中间件插件化（`agents.md:19`） |
 | 图运行时 | LangGraph 当前稳定版 | 业内事实标准 |
-| **短期记忆** | `memory/sessions.sqlite3`（**单文件双表**）——init 阶段 schema builder 创建，运行时 `SqliteSaver` 落盘历史 + `core.api.new_session` 写元数据（INSERT，**不**重复 `CREATE TABLE`）；长期 / 知识库另列（`store.sqlite3` v3 / `knowledge.sqlite3` v3+ 占位）。**详见下方 §3.1.1** | 唯一零配置本地文件选项；`sessions_metadata` 提供 title ↔ thread_id 映射 + 元数据持久化；F002-P2 `SqliteSchemaError` (exit 16) 通过 **5 项断言**判定 schema 健康（口径以 `harness/report/sessions_sqlite表结构一览.md` §7 为准） |
+| **短期记忆** | `memory/sessions.sqlite3`（**单文件三表两索引**：`checkpoints` / `writes` 由上游 saver 拥有 + `sessions_metadata` 由 donkey 自管）——init 阶段 schema builder 创建，运行时 `SqliteSaver` 落盘历史 + `core.api.new_session` 写元数据（INSERT，**不**重复 `CREATE TABLE`）；长期 / 知识库另列（`store.sqlite3` v3 / `knowledge.sqlite3` v3+ 占位）。**详见下方 §3.1.1** | 唯一零配置本地文件选项；`sessions_metadata` 提供 title ↔ thread_id 映射 + 元数据持久化；F002-P2 `SqliteSchemaError` (exit 16) 通过 **5 项断言**判定 schema 健康（口径以 `harness/report/sessions_sqlite表结构一览.md` §7 为准） |
 
 #### 3.1.1 短期记忆实现细则（`memory/sessions.sqlite3`）
 
-- **单文件双表**：`SqliteSaver` 自有 `checkpoints` / `writes`（短期 message 历史，`thread_id` 即主键）+ donkey 自管 `sessions_metadata`（元数据）；另加 2 个索引；
+- **单文件三表两索引**：`SqliteSaver` 自有 `checkpoints` / `writes`（短期 message 历史，`thread_id` 即主键）+ donkey 自管 `sessions_metadata`（元数据）；另加 2 个索引；
 - **`sessions_metadata` 6 字段**：`thread_id` ↔ `title` + `created_at` / `updated_at` / `donkey_version` / `first_prompt`（N-09 / N-10 实现机制；详见 `harness/report/sessions_sqlite表结构一览.md` §2.2）；
 - **写元数据不建表**：`core.api.new_session` 只 INSERT，**不**重复 `CREATE TABLE`（掩盖 init 缺失 / `--force` 后被破坏等异常）；
 - **`--force` = 恢复出厂设置**：删 + 重建 sqlite3（含 schema），用户须在 `--force` 前手动备份（`cp memory/*.sqlite3 /tmp/backup-*.sqlite3`）；"运行数据可选择性导出"仍生效——sqlite3 模板身份 ≠ 必须导出；
@@ -183,7 +183,8 @@
 
 ### 3.2 永不使用清单
 
-- ❌ **LangSmith** 任何形态（详见 N-12）：**禁止**使用 LangSmith Cloud / Studio UI / Tracing / Deployment / Hub / `langchain[langsmith]` extras / `LANGSMITH_TRACING` 等环境变量；**禁止**在 `donkey.core` / cli / web / gui 任何代码路径中 `import langsmith` 或 `import langchain.langsmith / langchain_community.langsmith / langgraph.langsmith` 等任何 langsmith.* 子包（包括但不限于为了"诊断智能体"或"打印运行轨迹"等用途）—— 智能体诊断统一通过 `donkey.core` 自有输出（stdout 日志 / 事件流 / 后续自研 tracer）实现，受 `harness/report/全开源最佳实践.md` §0 约束；
+- ❌ **LangSmith** 任何形态（详见 N-12）：**禁止**使用 LangSmith Cloud / Studio UI / Tracing / Deployment / Hub / `langchain[langsmith]` extras / `LANGSMITH_TRACING` 等环境变量；**禁止**在 `donkey.core` / cli / web / gui 任何代码路径中 `import langsmith` 或 `import langchain.langsmith / langchain_community.langsmith / langgraph.langsmith` 等任何 langsmith.* 子包（包括但不限于为了"诊断智能体"或"打印运行轨迹"等用途）—— 智能体诊断统一通过 `donkey.core` 自有输出（stdout 日志 / 事件流 / 后续自研 tracer）实现，受 `harness/report/全开源最佳实践.md` §0 约束。
+  > **边界（2026-10-23 澄清，见 [D-17]）**：以上禁令的约束对象是 **donkey 自有代码路径**的 import 与使用；第三方库的**传递依赖被安装到磁盘**不构成"使用"（例：`langchain-core` 会把 `langsmith` 作为硬传递依赖装上磁盘，但 donkey 自有代码永不 import 它）。此类依赖 MUST 在 plan 中显式登记其影响面与门禁验证方式，MUST NOT 以"安装"之名引入任何实际的 LangSmith 使用。
 - ❌ **deepagents** 包（含 `create_deep_agent` / FilesystemMiddleware / SubAgentMiddleware / RubricMiddleware / SkillsMiddleware / MemoryMiddleware）—— 见 §2.7.2；
 - ❌ **ShellToolMiddleware**（持久 shell + HITL 冲突）—— 由 `tools/commandline.py` 替代；
 - ❌ **subagent / 子智能体相关任何目录或字段**（`agent = 人`）—— N-02；
@@ -362,6 +363,8 @@ AC-1 ~ AC-5 全部通过；三套官方模板 workspace（通用型 / 编程型 
 | **[D-14]** | **AC-1 的出厂态豁免**——`donkey load` 的"100% 通过"口径 = **配置完成后**的 workspace；`donkey init` 刚生成的出厂态（26 个 provider stub 全部 `enabled = false`、零 enabled provider）**豁免**，必然报 exit 11（`ProviderTomlFieldError`）并自带三步配置指引。**零 enabled 不得降级为 warning**：它会让后续动态检查（模型连通性 exit 15）无模型可测 → 必须在静态检查阶段就失败 | 立项书 §3.2.3 ③ + README §3.2.1 |
 | **[D-15]** | **subagent 永不纳入**——宪法 N-02"agent = 人"是项目身份级哲学，**任何版本号都不为其预留功能位**（v1.5.3 版本演进规划 / §5.4 甘特图中均不得出现 subagent 交付物） | N-02 + 立项书 §1.5.3 / §4.10 TD-05 / §10.3.2 Q-05 |
 | **[D-16]** | **v1 LLM 接入零自研解析层**——26 个 provider 全部复用 LangChain 官方类（唯一抽象 = `ReusableProvider` 薄包装）；`provider_id` → LangChain 类的翻译由 **donkey facade** 完成，**禁止**把 TOML 的 `default_provider` 直接喂 `init_chat_model`；donkey 在解析层的唯一职责是**配置层严格校验**（per-provider schema + F002 load 校验，exit 11 伞形）。配置布局 = `providers/` 目录 + 一 provider 一文件 + `enabled` 开关 | `大模型toml参数设计.md` §2 / §7 / §15 |
+| **[D-17]** | **N-12 的边界澄清**——N-12 禁止的是 **donkey 自有代码路径**（`donkey.core` / `cli` / `web` / `gui`）对 LangSmith 任何形态的 **import 与使用**；第三方库的**传递依赖被安装到磁盘**不构成"使用"，但 MUST 在 plan 中显式登记影响面，且 MUST 由门禁实证"donkey 永不 import"（不设 `LANGSMITH_*` 等环境变量）。**动机**：F001-P2 引入 `langgraph-checkpoint-sqlite`（短期记忆库的历史表 / 写入表 MUST 由上游 saver 的实例 `setup()` 创建，donkey MUST NOT 手写 DDL），其传递依赖 `langchain-core` 会把 `langsmith` **安装到磁盘** —— 实测导入上游 saver 新增 471 个模块、langsmith 相关 **0** 个进入进程。若不加边界澄清，plan 将被迫对宪法 MUST 作单方面重新解释（违反 §6.1 宪法权威）。**影响面**：仅 N-12 / §3.2 的读法澄清，**不放宽任何 import 禁令**；受影响产物 = F001-P2 的 `plan.md`（G6 / 风险表 / R-02）、`quickstart.md` §4~§5 的 grep 自检、`spec.md` SC-017 | N-12 + F001-P2 Maintainer 裁决（2026-10-23） |
+| **[D-18]** | **短期记忆库的表数量口径** —— §3.1 表格原写"单文件双表"，实为 **3 张表 + 2 个索引**：`checkpoints` / `writes`（上游 `langgraph-checkpoint-sqlite` 的 `SqliteSaver` 拥有）+ `sessions_metadata`（donkey 自管，含 `idx_sessions_metadata_title` / `idx_sessions_metadata_updated_at` 两个索引）。权威结构定义见 `harness/report/sessions_sqlite表结构一览.md` §2.2 与 §7（5 项健康断言）。**本条只澄清 §3.1 表格措辞，不放宽任何约束**：F002-P2 的 `SqliteSchemaError`（exit 16）5 项断言口径不变。**同源措辞已一并同步**（原「单文件双表」在 3 处遗留，现全部改为「单文件三表两索引」）：① 本宪法 §3.1.1 首条的标签；② 立项书 §4.6.3「模板预创建」行与「`sessions.sqlite3` 单文件三表两索引设计」小节（含其「承载三张表」「三张表互不干扰」两句）；③ 宪法 §3.1 表格（本条前半段所述）。各处**表数 / 索引数 / 字段 / 断言口径逐字未动**，仅标签与「两套表 → 三张表」的计数措辞对齐 | 立项书 §5.5.3 + `sessions_sqlite表结构一览.md` §2.2 / §7 |
 
 ---
 
@@ -389,15 +392,18 @@ AC-1 ~ AC-5 全部通过；三套官方模板 workspace（通用型 / 编程型 
 2. 在 PR 描述中显式声明例外范围与过期时间；
 3. 在过期前完成合规修复或正式纳入宪法。
 
-> **例外 E-01（2026-10-21，Maintainer 批准）**：F001-P1 **不**交付 `.github/workflows/ci.yml`。
-> - **范围**：仅 F001-P1（`cli_validation` Phase）；`donkey init` 的 CI 工作流文件推迟到仓库级 CI 落地时创建。
+> **例外 E-01（2026-10-21，Maintainer 批准；2026-10-23 范围扩展至 F001-P2，Maintainer 批准）**：F001-P1 与 F001-P2 **均不**交付 `.github/workflows/ci.yml`。
+> - **范围**：仅 F001-P1（`cli_validation` Phase）**与 F001-P2（`template_skeleton` Phase）**；`donkey init` 的 CI 工作流文件推迟到仓库级 CI 落地时创建。
+>   （2026-10-23 扩展说明：F001-P2 引入第一个运行期依赖与 14 个黑盒验收场景，测试面进一步扩大，CI 文件仍属仓库级资产；
+>   本次扩展**不改变**过期时间、**不改变**替代保障清单、**不新增**任何豁免条款。）
 > - **理由**：CI 工作流文件属**仓库级资产**（宪法 §4.1 的项目级方法论），非单 Phase 交付物；
 >   且 F001-P1 落地时仓库仅有 1 个 Phase 的测试面，首次落地 CI 的时序风险高于收益。
 >   替代保障：plan G5 记录 CI 最小内容骨架（`pytest tests/` + `pytest tests/unit/ --cov=donkey.core --cov-fail-under=80`
 >   + `ruff check donkey/ tests/` + `mypy donkey/ tests/`），本 Phase 的完成证据以本地命令清单为准。
 > - **过期时间**：F001-P3（`builtin_tools`）结束前 —— 最迟在该 Phase 内交付 `.github/workflows/ci.yml`，
 >   或由 Maintainer 显式决定转为正式纳入宪法。
-> - **登记位置**：plan G5（判定保持「⚠️ 部分」，依据列补注本例外）；`research.md` R-08（结论不变，仅记录例外已登记）。
+> - **登记位置**：F001-P1 的 `plan.md` G5 与 F001-P2 的 `plan.md` G5（判定保持「⚠️ 部分」，依据列补注本例外）；
+>   `research.md` R-08（结论不变，仅记录例外已登记）；`harness/features/README.md` §4.3（登记范围扩展）。
 
 ---
 

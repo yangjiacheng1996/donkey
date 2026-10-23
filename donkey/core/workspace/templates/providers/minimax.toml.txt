@@ -1,0 +1,43 @@
+# =============================================================================
+# providers/minimax.toml —— MiniMax M（OpenAI 兼容 + Coding Plan `sk-cp-` 密钥）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "minimax" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+# 注：MiniMax 主流用法是 Coding Plan（订阅密钥 sk-cp-...）+ OpenAI 兼容端点
+# https://api.minimaxi.com/v1。thinking 以 <think>...</think> 标签保留在 content，
+# 应用层用正则提取（见 §3.6）。
+#
+# 端点差异：
+#   - https://api.minimaxi.com/v1  → OpenAI 兼容（Coding Plan 默认；用 ChatOpenAI）
+#   - https://api.minimax.io/anthropic → Anthropic SDK 兼容（普通 API key；v2+ 才支持）
+
+api_key = ""                  # 填 sk-cp-... (Coding Plan) 或 MINIMAX_API_KEY (普通 API)
+api_host = "https://api.minimaxi.com/v1"  # 默认 Coding Plan OpenAI 兼容端点
+timeout = 60
+max_retries = 6
+temperature = 0.7
+max_tokens = 4096
+
+# Coding Plan 端点默认 reasoning_split=false，thinking 在 content 里以 <think> 标签包裹。
+# 若想让 reasoning 走 reasoning_content 字段（需用 ChatAnthropic 之外的专用类），v2+ 实现。
+
+[models.MiniMax-M3]
+max_tokens = 8192
+
+# ⚠️ model_id 含 "." 时**必须加引号**。TOML 裸 key 不允许含 "."，
+#    写成 [models.MiniMax-M2.7] 会被解析成嵌套表
+#    （MiniMax-M2 → 7），模型表结构被**静默破坏**（models["MiniMax-M2.7"] 永远查不到）。
+#    bedrock 的 us.anthropic.claude-sonnet-4-6 同理。
+[models."MiniMax-M2.7"]
+max_tokens = 4096
+
+[models.MiniMax-M2]
+max_tokens = 4096

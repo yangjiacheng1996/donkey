@@ -1,0 +1,18 @@
+---
+name: example
+description: 示例 Skill —— 演示 Skills 的三层渐进披露模型，可作为自用 Skill 的起点。
+---
+
+# example
+
+## 第二层：正文主体（Level 2）
+
+正文主体说明这个 Skill 解决什么问题、什么时候该用它、产出是什么。当前只给出占位级的结构说明。
+
+> 完整第二层正文由 F001-P3 覆盖写入。
+
+## 第三层：附属资源（Level 3）
+
+按需加载的附加资源放在 `reference/` / `scripts/` / `templates/` 子目录中，主文件只给出索引。
+
+> 第三层示例由 F001-P3 覆盖写入。

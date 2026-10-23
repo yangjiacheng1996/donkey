@@ -1,0 +1,25 @@
+# =============================================================================
+# providers/databricks.toml —— Databricks（自家模型 + 开源模型托管）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "databricks" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+# 走专用 `ChatDatabricks` 类（databricks-langchain）。
+# 鉴权用 Databricks Personal Access Token + endpoint URL。
+
+api_key = ""
+api_host = ""                 # 必填：Databricks endpoint
+timeout = 60
+max_retries = 6
+temperature = 0.7
+max_tokens = 4096
+
+[models.databricks-dbrx-instruct]
+max_tokens = 4096

@@ -2,6 +2,12 @@
 
 本文件被 7 个用户故事共用，每个故事在**同一个测试函数内**扩写断言组，
 不新增测试函数——core 层的测试函数总数恒为 17（见 tasks.md 口径说明）。
+
+> **F001-P2 的口径修订**：本文件原有 3 处断言编码了 F001-P1 的**阶段边界**
+> （"不加载模板清单" / "三个计数恒为 0" / "--force 不触发任何重置"）。这三处
+> 已被 F001-P2 的规格明确取代（spec FR-017 / FR-026 / FR-029 / 澄清 #26），
+> 故改写为**与 P2 一致**的断言，同时保留各故事**持久**的不变量（根目录被创建 /
+> 路径与名称派生 / 清单外的用户内容零改动 / 清单缺失归退出码 3）。
 """
 
 import os
@@ -10,17 +16,20 @@ from pathlib import Path
 import pytest
 
 from donkey.core.api import init_workspace
-from donkey.core.exceptions import PathNotFoundError, PathPermissionError
-from donkey.core.workspace.init import check_path, check_permission
-
-#: 模板资产 MUST 由**仓库源树**定位——若以非 editable 方式安装，改名会落到
-#: site-packages 上（污染环境或因只读而失败）。
-TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "donkey" / "core" / "workspace" / "templates"
+from donkey.core.exceptions import PathNotFoundError, PathPermissionError, TemplateGenerationError
+from donkey.core.workspace.init import check_path, check_permission, load_template_manifest
 
 
 def test_init_workspace_creates_root_dir(tmp_path: Path) -> None:
-    """US1：全新路径 → 根目录被创建，三个计数恒为 0，路径为绝对路径。"""
+    """US1：全新路径 → 根目录被创建，三个计数按清单口径，路径为绝对路径。
+
+    计数口径自 F001-P2 起由"恒为 0"改为"清单口径"（spec FR-017 / FR-026）——
+    P1 的 FR-029「不加载清单」已被 F001-P2 取代，本用例保留 P1 的**持久**不变量
+    （根目录被创建 / 路径为绝对路径 / 名称派生自末段名）。
+    """
     target = tmp_path / "ws"
+    entries = load_template_manifest()
+    file_type_count = len([e for e in entries if e.get("format", "text") != "directory"])
 
     result = init_workspace(target)
 
@@ -28,8 +37,8 @@ def test_init_workspace_creates_root_dir(tmp_path: Path) -> None:
     assert result.workspace_path.is_absolute()
     assert result.workspace_path == target
     assert result.name == "ws"
-    assert result.templates_loaded == 0
-    assert result.files_created == 0
+    assert result.templates_loaded == len(entries)
+    assert result.files_created == file_type_count
     assert result.files_skipped == 0
 
     # 追加断言组：path MUST 接受字符串与路径对象两种形态（spec FR-005），
@@ -178,12 +187,14 @@ def test_init_workspace_existing_is_not_error(tmp_path: Path) -> None:
     user_file = existing / "user.txt"
     user_file.write_text("user content", encoding="utf-8")
     before_stat = user_file.stat()
+    entries = load_template_manifest()
+    file_type_count = len([e for e in entries if e.get("format", "text") != "directory"])
 
     result = init_workspace(existing)
 
-    assert result.files_created == 0
+    assert result.files_created == file_type_count
     assert result.files_skipped == 0
-    assert result.templates_loaded == 0
+    assert result.templates_loaded == len(entries)
     assert result.workspace_path == existing
     assert user_file.read_text(encoding="utf-8") == "user content"
     after_stat = user_file.stat()
@@ -191,8 +202,13 @@ def test_init_workspace_existing_is_not_error(tmp_path: Path) -> None:
     assert after_stat.st_size == before_stat.st_size
 
 
-def test_init_workspace_force_recorded_not_applied(tmp_path: Path) -> None:
-    """US5：``force=True`` → 被记录并回显，但本阶段不触发任何重置。"""
+def test_init_workspace_force_recorded_and_user_content_preserved(tmp_path: Path) -> None:
+    """US5：``force=True`` → 被记录并回显，且**清单外**的用户内容不被删除/覆盖。
+
+    P1 的 FR-028「本阶段不触发任何重置」已被 F001-P2 的"恢复出厂设置"语义
+    取代（模板清单内的条目会被重建）；但 P1 的**持久**不变量 —— 清单外的用户
+    内容零改动 —— 仍 MUST 成立（spec FR-013）。
+    """
     existing = tmp_path / "ws"
     existing.mkdir()
     user_file = existing / "user.txt"
@@ -203,43 +219,33 @@ def test_init_workspace_force_recorded_not_applied(tmp_path: Path) -> None:
 
     assert result.force is True
     assert result.workspace_path == existing
-    # 目录内容不变（未发生重置）。
+    # 清单外的用户内容不变（未被删除或覆盖）。
     assert user_file.read_text(encoding="utf-8") == "user content"
     assert user_file.stat().st_mtime_ns == before_stat.st_mtime_ns
-    assert sorted(p.name for p in existing.iterdir()) == ["user.txt"]
+    # 模板清单内的条目则被重建为出厂内容。
+    assert (existing / "instruction.md").is_file()
 
 
-def test_init_workspace_does_not_load_manifest(tmp_path: Path) -> None:
-    """US6：模板清单 / 模板源缺失 MUST NOT 导致失败，且目标目录内无任何文件。"""
-    manifest = TEMPLATES_DIR / "manifest.json"
-    manifest_backup = TEMPLATES_DIR / "manifest.json.bak"
-    source = TEMPLATES_DIR / "instruction.md.txt"
-    source_backup = TEMPLATES_DIR / "instruction.md.txt.bak"
+def test_init_workspace_missing_manifest_raises_template_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """US6：模板清单缺失 → 模板生成类错误（退出码 ``3``）。
 
-    try:
-        os.rename(manifest, manifest_backup)
+    P1 的 FR-029「MUST NOT 加载或解析模板清单」已被 F001-P2 取代：清单缺失
+    MUST 按模板生成类错误处理（spec FR-002 / FR-038）—— 用户修复动作是"重装
+    donkey"，与路径类错误不同。本用例以**注入式**构造，MUST NOT 破坏已安装
+    包（spec FR-056）。
+    """
 
-        result = init_workspace(tmp_path / "ws-without-manifest")
+    def _boom(*args: object, **kwargs: object) -> list[dict]:
+        raise TemplateGenerationError("注入的清单缺失")
 
-        assert result.templates_loaded == 0
-        assert result.files_created == 0
-        assert result.files_skipped == 0
-        assert list((tmp_path / "ws-without-manifest").iterdir()) == []
+    monkeypatch.setattr("donkey.core.workspace.init.load_template_manifest", _boom)
 
-        # 追加覆盖：模板源占位缺失同样不导致失败。
-        os.rename(source, source_backup)
+    with pytest.raises(TemplateGenerationError):
+        init_workspace(tmp_path / "ws-without-manifest")
 
-        result_without_source = init_workspace(tmp_path / "ws-without-source")
-
-        assert result_without_source.templates_loaded == 0
-        assert result_without_source.files_created == 0
-        assert result_without_source.files_skipped == 0
-        assert list((tmp_path / "ws-without-source").iterdir()) == []
-    finally:
-        if manifest_backup.exists():
-            os.rename(manifest_backup, manifest)
-        if source_backup.exists():
-            os.rename(source_backup, source)
+    assert not (tmp_path / "ws-without-manifest").exists()
 
 
 def test_init_workspace_name_from_basename(tmp_path: Path) -> None:

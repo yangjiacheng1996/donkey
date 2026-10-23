@@ -1,0 +1,45 @@
+# =============================================================================
+# providers/openrouter.toml —— OpenRouter（统一路由 100+ 模型）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "openrouter" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+# ⚠️ 走专用 `ChatOpenRouter` 类（langchain-openrouter）。
+# 禁止走 ChatOpenAI + base_url——OpenRouter 自带多 provider routing 和
+# reasoning_details 等非标字段，必须用专用类才能完整解析。
+
+api_key = ""
+
+# 自定义 API 端点。**必填**（与 openai-compatible 不同，OpenRouter 官方 endpoint
+# 由 ChatOpenRouter 固定为 "https://openrouter.ai/api/v1"，但允许自定义代理）。
+api_host = "https://openrouter.ai/api/v1"
+
+# OpenRouter 专属：provider routing 偏好（选填，默认按价格自动）。
+# 详见 https://openrouter.ai/docs/provider-routing
+provider_preferences = ""     # JSON 字符串，如 '{"order":["anthropic","openai"]}'
+
+timeout = 60
+max_retries = 6
+temperature = 1.0
+max_tokens = 4096
+
+[models.auto]
+# "auto" 模型让 OpenRouter 自动选择
+max_tokens = 4096
+
+[models."anthropic/claude-sonnet-4-6"]
+max_tokens = 4096
+
+[models."deepseek/deepseek-chat"]
+# 经 OpenRouter 调用 DeepSeek——保留 reasoning_content（由 ChatOpenRouter 处理）
+max_tokens = 4096
+
+[models."openai/o3"]
+reasoning_effort = "high"     # OpenRouter 透传

@@ -55,3 +55,31 @@ def test_main_unregistered_exception_falls_back_to_1(
     assert exit_code == 1
     captured = capsys.readouterr()
     assert "[donkey init] 失败：" in captured.err
+
+
+def test_cli_force_warning_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """带 ``--force`` 时 stdout 额外有一行强制清空提示；不带时**没有**该行。
+
+    提示 MUST 与通用摘要**分行**、MUST NOT 挤占摘要的六个字段
+    （spec FR-068 / SC-019）。
+    """
+    workspace = tmp_path / "ws"
+    summary_fields = ("workspace=", "name=", "force=", "templates=", "created=", "skipped=")
+
+    assert cli_client.main(["init", str(workspace)]) == 0
+    captured = capsys.readouterr()
+    assert len(captured.out.splitlines()) == 1
+    assert "清空" not in captured.out
+    for field in summary_fields:
+        assert field in captured.out, field
+
+    assert cli_client.main(["init", str(workspace), "--force"]) == 0
+    captured = capsys.readouterr()
+    lines = captured.out.splitlines()
+    assert len(lines) == 2
+    warning = lines[1]
+    # 文案 MUST 同时涵盖"已清空 / 已重建"两种情形
+    assert "清空" in warning
+    assert "重建" in warning
+    for field in summary_fields:
+        assert field in captured.out, field

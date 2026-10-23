@@ -1,0 +1,25 @@
+# =============================================================================
+# providers/kimi.toml —— 月之暗面 Kimi（OpenAI 兼容）
+# =============================================================================
+#
+# 启用步骤：
+#   1. 把下面 enabled 改成 true
+#   2. 填入真实凭据（api_key / aws_* 等）
+#   3. 在 providers/default.toml 里设置 default_provider = "kimi" + default_model
+#
+# enabled = false 时本文件**完全惰性**：不校验字段、不要求 api_key、
+# 不参与连通性检查（仅校验文件名 stem 是否为已知 provider_id）。
+enabled = false
+
+api_key = ""
+api_host = ""                 # 默认 "https://api.moonshot.cn/v1"
+timeout = 60
+max_retries = 6
+temperature = 0.3             # Kimi 官方推荐 0.3
+max_tokens = 4096
+
+[models.moonshot-v1-128k]
+max_tokens = 128000
+
+[models.kimi-k2-0711-preview]
+max_tokens = 8192
