@@ -33,8 +33,8 @@
 # /speckit.tasks
 我已经更新了spec和plan，请你更新tasks
 
-# /speckit.analyse
-我更新了F001-P3的spec、plan、tasks，请你阅读相关文档，检查三者内容是否有问题，是否对齐。如果遇到难以决策的地方可以question问我，提问时给出推荐选项，语言中文。
+# /speckit.analyse 
+我更新了F001-P4的spec、plan、tasks，请你阅读相关文档，检查三者内容是否有问题，是否对齐。如果遇到难以决策的地方可以question问我，提问时给出推荐选项，语言中文。
 
 # analyse之后
 好的，我看到你发现了一些问题。
@@ -48,12 +48,14 @@
 如果你认为这些问题太小，忽略不计，无需修复，也可以建议我直接执行/speckit.implement 。
 我不会人工修改文档和代码，因为我担心我的失误导致项目走偏，并且人工修改成本过高，我没有这个时间。
 
+# 直接修复（无critical问题可用）
+本次analyse检查没有发现critical问题，所以都是小问题，我授权你可以修改本项目的任何文件，请你直接修改文件，修复上述问题，有难以决策的地方可以询问我。
 
 # constitution问题
 我看到了你的回答，明白现在需要更新宪法。请你给出宪法更新的提示词，我会新建另一个会话，开始执行/speckit.constitution +提示词 ，来修改宪法。
 
 # /speckit.implement
-根据harness/ 目录中的LangChain、LangGraph官方文档，harness/features/立项书.md，以及相关spec，完成F001-P3（specs/001-donkey-init-workspace/phase-3-builtin-tools）的TDD软件开发和测试。
+根据harness/ 目录中的LangChain、LangGraph官方文档，harness/features/立项书.md，以及相关spec，完成F001-P4（specs/001-donkey-init-workspace/phase-4-cli-version）的TDD软件开发和测试。
 
 # /sepckit.converge
 我更新了Fxxx-Px的代码，请你根据代码改动，反向更新相关的spec、plan、tasks。

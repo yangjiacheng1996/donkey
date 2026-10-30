@@ -246,7 +246,10 @@ def test_scenario_1_new_workspace_full_tree(tmp_path: Path) -> None:
     assert completed.returncode == 0, (
         f"stdout={completed.stdout!r} stderr={completed.stderr!r}"
     )
-    assert "templates=54 created=48 skipped=0" in completed.stdout
+    assert (
+        "templates=54 files_created=48 files_overwritten=0 files_skipped=0 "
+        "dirs_created=6 dirs_skipped=0"
+    ) in completed.stdout
     assert ws.is_dir()
 
     # 必填文件
@@ -463,7 +466,17 @@ def test_scenario_8_force_overwrites(tmp_path: Path) -> None:
     # 强制清空提示行 MUST 出现（spec FR-059 / SC-019）
     assert "清空" in completed.stdout
     # 通用摘要的六个字段仍完整可见
-    for field in ("workspace=", "name=", "force=", "templates=", "created=", "skipped="):
+    for field in (
+        "workspace=",
+        "name=",
+        "force=",
+        "templates=",
+        "files_created=",
+        "files_overwritten=",
+        "files_skipped=",
+        "dirs_created=",
+        "dirs_skipped=",
+    ):
         assert field in completed.stdout, field
 
 

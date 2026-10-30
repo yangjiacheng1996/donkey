@@ -909,27 +909,48 @@ def test_force_restores_every_other_entry_to_factory_content(
 
 
 def test_counts_across_init_modes(workspace: Path, tmp_path: Path) -> None:
-    """三种情形的计数：全新 54/48/0，二次 54/0/48，强制（契约库已存在）54/47/1。"""
+    """三种情形的计数（按「对象 × 动作」分解 —— 宪法 [D-22]）。
+
+    - **全新**：文件新建 48、目录新建 6、其余为 0；
+    - **二次**：文件跳过 48、目录跳过 6、其余为 0；
+    - **强制**（契约库已存在）：文件**覆盖** 47、文件跳过 1（契约库豁免）、
+      目录跳过 6。
+
+    > **断言改写登记（宪法 [D-22] · 2026-10-30 · Maintainer 裁决）**：原断言
+    > 为 ``(templates, created, skipped)`` 三元组，其中强制情形的 ``created=47``
+    > 实为"**覆盖**"而非"新建"—— 两个动作被并入同一计数。本断言改为按
+    > 「对象 × 动作」分解，并保留 v1 三元组的语义归位（``files_created``
+    > 严格为"本次新建"）。
+    """
     fresh = init_workspace(tmp_path / "fresh")
-    assert (fresh.templates_loaded, fresh.files_created, fresh.files_skipped) == (
-        54,
-        48,
-        0,
-    )
+    assert (
+        fresh.templates_loaded,
+        fresh.files_created,
+        fresh.files_overwritten,
+        fresh.files_skipped,
+        fresh.dirs_created,
+        fresh.dirs_skipped,
+    ) == (54, 48, 0, 0, 6, 0)
 
     second = init_workspace(tmp_path / "fresh")
-    assert (second.templates_loaded, second.files_created, second.files_skipped) == (
-        54,
-        0,
-        48,
-    )
+    assert (
+        second.templates_loaded,
+        second.files_created,
+        second.files_overwritten,
+        second.files_skipped,
+        second.dirs_created,
+        second.dirs_skipped,
+    ) == (54, 0, 0, 48, 0, 6)
 
     forced = init_workspace(workspace, force=True)
-    assert (forced.templates_loaded, forced.files_created, forced.files_skipped) == (
-        54,
-        47,
-        1,
-    )
+    assert (
+        forced.templates_loaded,
+        forced.files_created,
+        forced.files_overwritten,
+        forced.files_skipped,
+        forced.dirs_created,
+        forced.dirs_skipped,
+    ) == (54, 0, 47, 1, 0, 6)
 
 
 def test_force_keeps_user_authored_tools(workspace: Path) -> None:

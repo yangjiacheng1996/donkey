@@ -14,8 +14,9 @@ workspace 内落地模板，二者均可通过路径入参注入 —— 使单�
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from donkey.core.exceptions import (
     _NEXT_STEP_TEMPLATE,
@@ -29,6 +30,39 @@ from donkey.core.workspace.sqlite3_templates import (
     build_sessions_sqlite,
     build_store_sqlite,
 )
+
+#: 逐项明细的**操作对象**维度 —— 文件 / 目录。
+InitItemKind = Literal["file", "dir"]
+
+#: 逐项明细的**动作**维度 —— 新建 / 覆盖 / 跳过。
+#:
+#: - ``created``：原本不存在 → 本次新建；
+#: - ``overwritten``：已存在 + ``--force`` → 删除后重建（**内容被覆盖**）；
+#: - ``skipped``：已存在且未强制 → **完全不动**（内容与 mtime 均不变）。
+#:
+#: 目录条目**永不**是 ``overwritten`` —— 既有目录一律"保留不变"，其内文件
+#: 的重置由各自的文本 / sqlite3 条目负责。
+InitItemAction = Literal["created", "overwritten", "skipped"]
+
+
+@dataclass(frozen=True)
+class InitItem:
+    """模板清单条目的**逐项**落地结果。
+
+    字段与语义：
+
+    - ``path``：**工作区相对**路径（POSIX 风格；目录条目以 ``/`` 结尾）；
+    - ``kind``：操作对象 —— ``"file"`` / ``"dir"``；
+    - ``action``：动作 —— ``"created"`` / ``"overwritten"`` / ``"skipped"``。
+
+    本类型是**逐项明细的唯一真相源** —— ``InitResult`` 的各计数字段皆由
+    它投影而来（宪法 [D-22]）。
+    """
+
+    path: str
+    kind: InitItemKind
+    action: InitItemAction
+
 
 #: 路径类失败统一的"下一步"提示（spec FR-019 / SC-012）。
 _NEXT_STEP = "下一步：请先建目录，或换路径到父目录已存在的目标。"
@@ -311,11 +345,16 @@ def _render_text_template(
     relative: str,
     name: str,
     force: bool,
-) -> bool:
-    """渲染一个文本模板类条目。
+) -> InitItemAction:
+    """渲染一个文本模板类条目，返回本次**动作**。
 
-    返回：``True`` = 本次新建（计入 ``files_created``）；``False`` = 已存在
-    而跳过（计入 ``files_skipped``）。
+    返回：``"created"``（原本不存在 → 新建）/ ``"overwritten"``（已存在 +
+    强制 → 删除后重建）/ ``"skipped"``（已存在且未强制 → 完全不动）。
+
+    > **口径变更登记（宪法 [D-22]）**：本函数原先返回 ``bool``（``True`` =
+    > 新建、``False`` = 跳过）—— 其中 ``--force`` 下的**覆盖**被并入
+    > ``True``，导致"新建"与"覆盖"两个动作在计数上**不可区分**。现按
+    > 「对象 × 动作」模型返回三态动作。
     """
     source = templates_root / f"{relative}.txt"
     if not source.exists():
@@ -329,14 +368,15 @@ def _render_text_template(
             f"读取模板源失败：{source}（{exc}）。{_NEXT_STEP_TEMPLATE}"
         ) from exc
 
-    if target.exists():
+    existed = target.exists()
+    if existed:
         if target.is_dir():
             raise TemplateGenerationError(
                 f"目标路径已存在且是目录：{target}。{_NEXT_STEP_TEMPLATE}"
             )
         if not force:
             # "完全不动" —— 内容与 mtime 均不变（spec FR-008 / 不变量 I1）。
-            return False
+            return "skipped"
         try:
             target.unlink()
         except OSError as exc:
@@ -352,19 +392,22 @@ def _render_text_template(
         raise TemplateGenerationError(
             f"写入模板文件失败：{target}（{exc}）。{_NEXT_STEP_TEMPLATE}"
         ) from exc
-    return True
+    return "overwritten" if existed else "created"
 
 
-def _render_directory_template(target: Path) -> None:
-    """渲染一个目录类条目。
+def _render_directory_template(target: Path) -> InitItemAction:
+    """渲染一个目录类条目，返回本次**动作**。
 
-    已存在（无论是否带强制标志）→ **保留不变**：MUST NOT 删除目录本身、
-    MUST NOT 删除目录内的**任何**文件（清单内外一律不动）；其内清单内文件
-    的重置由各自的文本 / sqlite3 条目负责（spec FR-010 / 不变量 I3）。
-    目录条目 MUST NOT 报错（spec Edge Cases「渲染与幂等类」）。
+    已存在（无论是否带强制标志）→ **保留不变**并返回 ``"skipped"``：
+    MUST NOT 删除目录本身、MUST NOT 删除目录内的**任何**文件（清单内外一律
+    不动）；其内清单内文件的重置由各自的文本 / sqlite3 条目负责
+    （spec FR-010 / 不变量 I3）。目录条目 MUST NOT 报错
+    （spec Edge Cases「渲染与幂等类」）。
+
+    目录条目**永不**是 ``"overwritten"`` —— 既有目录一律"保留不变"。
     """
     if target.exists():
-        return
+        return "skipped"
     _ensure_parent(target)
     try:
         target.mkdir(parents=True, exist_ok=True)
@@ -372,21 +415,23 @@ def _render_directory_template(target: Path) -> None:
         raise TemplateGenerationError(
             f"创建模板目录失败：{target}（{exc}）。{_NEXT_STEP_TEMPLATE}"
         ) from exc
+    return "created"
 
 
-def _render_sqlite3_template(target: Path, force: bool) -> bool:
+def _render_sqlite3_template(target: Path, force: bool) -> InitItemAction:
     """渲染一个 sqlite3 条目（走结构构造器，spec FR-011 / FR-030）。
 
-    返回：``True`` = 本次新建；``False`` = 已存在而跳过。
+    返回：``"created"`` / ``"overwritten"`` / ``"skipped"``（同文本条目）。
     """
-    if target.exists():
+    existed = target.exists()
+    if existed:
         if target.is_dir():
             raise TemplateGenerationError(
                 f"目标路径已存在且是目录：{target}。{_NEXT_STEP_TEMPLATE}"
             )
         if not force:
             # 完全不动 —— MUST NOT 校验其结构（schema 健康检查属 F002-P2）。
-            return False
+            return "skipped"
         # 连带删除同名 -wal / -shm 附属文件（防御性措施；实测陈旧 WAL 因盐值
         # 不匹配被安全忽略，MUST NOT 声称"不删必然导致旧数据回放"，
         # research.md R-03）。
@@ -407,7 +452,7 @@ def _render_sqlite3_template(target: Path, force: bool) -> bool:
         )
     _ensure_parent(target)
     builder(target)
-    return True
+    return "overwritten" if existed else "created"
 
 
 def render_templates(
@@ -416,7 +461,7 @@ def render_templates(
     force: bool,
     manifest_entries: list[dict[str, Any]],
     templates_root: Path | None = None,
-) -> tuple[int, int]:
+) -> list[InitItem]:
     """把模板清单渲染进 workspace。
 
     行为要点：
@@ -435,8 +480,13 @@ def render_templates(
     - 任何 IO / sqlite 失败一律归一为 ``TemplateGenerationError``，MUST NOT
       逃逸裸异常（spec FR-014）。
 
-    返回：``(files_created, files_skipped)`` —— 仅统计**文件型**条目（文本 +
-    sqlite3），目录条目不计入，按唯一路径计一次（spec FR-017）。
+    返回：**逐项明细** ``list[InitItem]`` —— 每个唯一路径一条记录，按
+    「对象（文件 / 目录）× 动作（新建 / 覆盖 / 跳过）」建模。
+
+    > **口径变更登记（宪法 [D-22]）**：本函数原先返回
+    > ``(files_created, files_skipped)`` 两个计数，且 ``--force`` 下的**覆盖**
+    > 被并入 ``created`` —— "新建"与"覆盖"两个动作**不可区分**。现改为返回
+    > 逐项明细，各计数由明细投影而来（单一真相源）。
     """
     workspace = Path(workspace_path)
     root = Path(templates_root) if templates_root is not None else DEFAULT_TEMPLATES_ROOT
@@ -451,38 +501,49 @@ def render_templates(
         # 后者覆盖前者 —— 重复项中最后出现的条目生效。
         unique[entry_path] = entry
 
-    created = 0
-    skipped = 0
+    # 目录条目的"存在状态" MUST 在渲染**之前**快照 —— 否则目录会被其**子条目**
+    # 的父目录创建（``_ensure_parent``）提前建出，轮到目录条目时它"已存在"
+    # → 全部被记成"跳过"，且结果依赖清单顺序（违反"MUST NOT 依赖条目顺序"）。
+    #
+    # 快照口径 = "**本次运行开始前**该目录是否存在" → 目录的"新建/跳过"
+    # 回答的是"这次 init 是否新建了这个目录"，而非"哪个条目顺手建了它"。
+    dir_preexisting = {
+        relative: _resolve_target(workspace, relative).exists()
+        for relative, entry in unique.items()
+        if entry.get("format", "text") == "directory"
+    }
+
+    items: list[InitItem] = []
     for relative, entry in unique.items():
+        action: InitItemAction
         entry_format = entry.get("format", "text")
         target = _resolve_target(workspace, relative)
 
         if entry_format == "directory":
             _render_directory_template(target)
+            action = "skipped" if dir_preexisting[relative] else "created"
+            items.append(InitItem(path=f"{relative}/", kind="dir", action=action))
             continue
         if entry_format == "sqlite3":
-            is_created = _render_sqlite3_template(target, force)
+            action = _render_sqlite3_template(target, force)
         elif entry_format in _TEXT_FORMATS:
-            is_created = _render_text_template(root, target, relative, name, force)
+            action = _render_text_template(root, target, relative, name, force)
         else:
             raise TemplateGenerationError(
                 f"未登记的模板条目 format：{entry_format!r}（路径 {relative}）。"
                 f"{_NEXT_STEP_TEMPLATE}"
             )
 
-        if is_created:
-            created += 1
-        else:
-            skipped += 1
-    return created, skipped
+        items.append(InitItem(path=relative, kind="file", action=action))
+    return items
 
 
 def _entries_for_render(
     workspace_path: Path,
     manifest_entries: list[dict[str, Any]],
     force: bool,
-) -> tuple[list[dict[str, Any]], int]:
-    """算出传给渲染器的条目列表，以及被豁免而计入"跳过"的条目数。
+) -> tuple[list[dict[str, Any]], str | None]:
+    """算出传给渲染器的条目列表，以及被豁免条目的相对路径（或 ``None``）。
 
     **条目级强制重置豁免**（spec FR-105 / research.md R-07）：带强制标志且
     工作区里**已存在**契约库时，把契约库条目从渲染列表中剔除 —— 契约库
@@ -497,28 +558,32 @@ def _entries_for_render(
     - ``render_templates`` 本身**一字不改**（通用渲染器 MUST NOT 被污染）；
     - 契约库**不存在**时 MUST 按出厂内容正常创建（与"无则增"通则一致）。
 
-    返回：``(渲染用条目列表, 计入 skipped 的条目数)``。
+    返回：``(渲染用条目列表, 被豁免条目的相对路径 或 None)``。
+
+    > **口径变更登记（宪法 [D-22]）**：原先返回"计入 skipped 的条目数"；
+    > 现返回**被豁免条目的路径** —— 使该条目也能进入**逐项明细**
+    > （它同样是一条"跳过"的记录，MUST NOT 在明细里缺席）。
     """
     if not force:
-        return manifest_entries, 0
+        return manifest_entries, None
 
     exempt_target = Path(workspace_path) / _FORCE_EXEMPT_ENTRY
     if not exempt_target.exists():
-        return manifest_entries, 0
+        return manifest_entries, None
 
     filtered = [
         entry
         for entry in manifest_entries
         if entry.get("path") != _FORCE_EXEMPT_ENTRY
     ]
-    return filtered, 1
+    return filtered, _FORCE_EXEMPT_ENTRY
 
 
 def init_workspace_inner(
     path: str | Path,
     name: str | None,
     force: bool,
-) -> tuple[Path, str, bool, int, int, int]:
+) -> tuple[Path, str, bool, list[InitItem], int]:
     """``donkey init`` 的内部初始化流程（五步流水线）。
 
     顺序固定（spec FR-027）：
@@ -529,7 +594,12 @@ def init_workspace_inner(
     4. 渲染模板骨架；
     5. 写入工作区清单。
 
-    返回：``(绝对路径, 最终名称, 强制标志, 新建文件数, 跳过文件数, 清单条目总数)``。
+    返回：``(绝对路径, 最终名称, 强制标志, 逐项明细, 清单条目总数)``。
+
+    > **口径变更登记（宪法 [D-22]）**：原先返回
+    > ``(…, 新建文件数, 跳过文件数, 清单条目总数)`` —— 计数在核心层算好后
+    > 直接透传给库 API；现改为返回**逐项明细**，由库 API 投影出各计数
+    > （单一真相源，见 ``InitItem``）。
 
     退出码按**阶段**切分（spec FR-038）：步骤 ③ 的一切失败（含磁盘满
     ``ENOSPC``）归 ``PathPermissionError``（退出码 ``2``）；步骤 ④ / ⑤ 的一切
@@ -552,18 +622,19 @@ def init_workspace_inner(
             f"创建 workspace 根目录失败：{abs_path}（{exc}）。{_NEXT_STEP}"
         ) from exc
 
-    entries_for_render, exempt_skipped = _entries_for_render(
+    entries_for_render, exempt_path = _entries_for_render(
         abs_path, manifest_entries, resolved_force
     )
-    created, skipped = render_templates(
+    items = render_templates(
         abs_path, resolved_name, resolved_force, entries_for_render
     )
-    # 被豁免而保留的契约库计入"跳过" —— 它确实没有被创建。
-    skipped += exempt_skipped
+    if exempt_path is not None:
+        # 被豁免而保留的契约库计入"跳过" —— 它确实没有被创建，也未被覆盖。
+        items.append(InitItem(path=exempt_path, kind="file", action="skipped"))
 
     write_workspace_manifest(abs_path, resolved_name, resolved_force)
 
     # ``manifest_total`` = 步骤 ② 已在手的**原始列表长度**（含重复条目）；
     # MUST NOT 为此二次调用 ``load_template_manifest()`` —— 会带来重复 IO 与
     # 第二个失败点，且与步骤 ② 的结果可能不自洽（spec FR-002 / FR-026）。
-    return abs_path, resolved_name, resolved_force, created, skipped, len(manifest_entries)
+    return abs_path, resolved_name, resolved_force, items, len(manifest_entries)

@@ -194,7 +194,10 @@ def test_scenario_1_builtin_tools_present(tmp_path: Path) -> None:
     assert completed.returncode == 0, (
         f"stdout={completed.stdout!r} stderr={completed.stderr!r}"
     )
-    assert "templates=54 created=48 skipped=0" in completed.stdout
+    assert (
+        "templates=54 files_created=48 files_overwritten=0 files_skipped=0 "
+        "dirs_created=6 dirs_skipped=0"
+    ) in completed.stdout
     for name in BUILTIN_TOOL_FILES:
         assert (ws / "tools" / name).is_file(), name
 
@@ -387,7 +390,10 @@ def test_scenario_8_removed_file_is_replenished(tmp_path: Path) -> None:
         f"stdout={completed.stdout!r} stderr={completed.stderr!r}"
     )
     assert (ws / "tools" / "filesystem.py").is_file()
-    assert "templates=54 created=1 skipped=47" in completed.stdout
+    assert (
+        "templates=54 files_created=1 files_overwritten=0 files_skipped=47 "
+        "dirs_created=0 dirs_skipped=6"
+    ) in completed.stdout
 
 
 def test_scenario_9_force_preserves_user_tools(tmp_path: Path) -> None:
@@ -408,7 +414,10 @@ def test_scenario_9_force_preserves_user_tools(tmp_path: Path) -> None:
     assert custom.is_file()
     assert custom.read_text(encoding="utf-8") == "# 我自己的工具\n"
     assert "# 改坏了" not in (ws / "tools" / "filesystem.py").read_text(encoding="utf-8")
-    assert "templates=54 created=47 skipped=1" in completed.stdout
+    assert (
+        "templates=54 files_created=0 files_overwritten=47 files_skipped=1 "
+        "dirs_created=0 dirs_skipped=6"
+    ) in completed.stdout
 
 
 def test_scenario_10_all_tools_callable_in_subprocess(tmp_path: Path) -> None:

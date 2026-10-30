@@ -242,9 +242,15 @@
 
 任何 spec / plan / tasks / 代码 / 文档中出现 F 编号引用必须与上表**字面对齐**。
 
+#### 4.2.1 元信息命令豁免
+
+F 编号表锁定的是**核心功能**的一级命令；**元信息命令**（只读地暴露工程元信息、不承载业务能力、不占用 exit code 段位、不需要 `donkey.core.api` 库 API）**豁免 F 编号登记**，当前唯一成员是 `donkey version`。
+
+边界：元信息命令 MUST NOT 被后续 Feature 扩张为业务命令 —— 一旦它开始承载可失败的业务能力（需要 Error class / exit code 段位 / 库 API），MUST 先按 §6.2 Governance 流程取得 F 编号。
+
 ### 4.3 Phase 切分规则（§立项书 5.2.1）
 
-**核心原则**：Phase 是 Feature 内部的**开发阶段**（dev unit，1 次 `/speckit.specify` 闭环单位），**不再按一级命令划分**（一级命令已被 F 编号锁死）。Phase 与 exit code 子段在 v1 baseline 中 1:1 对齐（4 术语区分详见 README §1.5）：
+**核心原则**：Phase 是 Feature 内部的**开发阶段**（dev unit，1 次 `/speckit.specify` 闭环单位），**不再按一级命令划分**（**核心功能的**一级命令已被 F 编号锁死；元信息命令按 §4.2 豁免）。Phase 与 exit code 子段在 v1 baseline 中 1:1 对齐（4 术语区分详见 README §1.5）：
 
 | 规则 | 适用 Feature | 切分单位 | 产物 |
 |---|---|---|---|
@@ -260,7 +266,7 @@
 | **子段** | 段位内的 exit code 子分组（Phase 在段位内占用的码范围，含已用 + 预留） | 错误 | `F001 子段 1` = exit 1-2 |
 | **Error class** | 具体 Python 异常类 | 代码 | `PathNotFoundError` 等 |
 
-**v1 baseline**：1 Phase = 1 子段 = 1 提示词文件 = 1 verify 脚本（27 Phase = 27 文件 / 27 脚本）；如未来某 Phase 工作量超出 1 次 `/speckit.specify` 闭环容量，Maintainer 显式决策拆 / 合（不自动推断，参见 README §12.2 备注）。
+**v1 baseline**：1 Phase = 1 子段 = 1 提示词文件 = 1 verify 脚本（27 Phase = 27 文件 / 27 脚本）；如未来某 Phase 工作量超出 1 次 `/speckit.specify` 闭环容量，Maintainer 显式决策拆 / 合（不自动推断，参见 README §12.2 备注）。**（元信息命令按 §4.2 豁免）**：§4.2.1 定义的元信息命令**不占用** exit code 子段、**不需要**提示词文件，故本句的 1:1 口径对元信息命令**不适用**（当前唯一成员 = `donkey version`，见 [D-20]）。
 
 **每设计一个 Phase 必带三要素**：
 1. **入口条件（Entry Gate）**：前置 Phase 的退出条件必须全部满足（可执行命令 / 测试验证通过；可能跨 Feature——按 §4.4 Speckit 协作方式滚动推进）；
@@ -349,9 +355,9 @@ AC-1 ~ AC-5 全部通过；三套官方模板 workspace（通用型 / 编程型 
 
 | 编号 | 决策 | 来源 |
 |---|---|---|
-| **[D-01]** | 一个 workspace 目录 = 一个 Agent；workspace 自带 manifest（仅 `version` / `name` / `created_at` / `donkey_version` 四字段最少化） | 立项书 §1.2.2 P1 |
+| **[D-01]** | 一个 workspace 目录 = 一个 Agent；workspace 自带 manifest（仅 `name` / `created_at` / `donkey_version` **三字段**最少化 —— 原"版本号（整数 `1`）"字段已删除，见 [D-21]） | 立项书 §1.2.2 P1 |
 | **[D-02]** | 依赖与配置随 workspace 走；运行数据（含 `memory/*.sqlite3`）可选择性导出——"模板身份" ≠ "必须导出" | 立项书 §1.2.2 P2 |
-| **[D-03]** | workspace 有格式版本号，donkey 升级时提供迁移路径；`sessions_metadata.donkey_version` 列作为迁移提示 | 立项书 §1.3 |
+| **[D-03]** | workspace 记录**donkey 版本号**（`manifest.json` 的 `donkey_version` 字段），donkey 升级时提供迁移路径；`sessions_metadata.donkey_version` 列作为迁移提示。**（原"格式版本号"字段已删除 —— 见 [D-21]；若将来清单结构出现不兼容演进，MUST 重新引入显式格式版本并同步本条）** | 立项书 §1.3 |
 | **[D-04]** | `cli` / `web` / `gui` 客户端**禁止**直接 import `langchain` / `langgraph` / `sqlite3`（N-04） | N-04 |
 | **[D-05]** | `donkey init` 在 init 阶段**程序化构造 sqlite3 schema**（非携带二进制模板）——sessions.sqlite3 由 `SqliteSaver(conn).setup()` + donkey 自管表组成；store.sqlite3 / knowledge.sqlite3 v1 仅空文件占位，schema 推迟 v3 SqliteStore / RAG 引擎选型 | `sessions_sqlite表结构一览.md` |
 | **[D-06]** | donkey 不依赖 LangSmith 任何形态（Cloud / Studio / Tracing / Deployment / Hub / `langchain[langsmith]` extras / `LANGSMITH_*` 环境变量 / `import langsmith.*`）；用 `stream_mode` + 自定义 Middleware + 标准 OpenTelemetry / Logging 替代 | N-12 + `全开源最佳实践.md` |
@@ -368,6 +374,9 @@ AC-1 ~ AC-5 全部通过；三套官方模板 workspace（通用型 / 编程型 
 | **[D-17]** | **N-12 的边界澄清**——N-12 禁止的是 **donkey 自有代码路径**（`donkey.core` / `cli` / `web` / `gui`）对 LangSmith 任何形态的 **import 与使用**；第三方库的**传递依赖被安装到磁盘**不构成"使用"，但 MUST 在 plan 中显式登记影响面，且 MUST 由门禁实证"donkey 永不 import"（不设 `LANGSMITH_*` 等环境变量）。**动机**：F001-P2 引入 `langgraph-checkpoint-sqlite`（短期记忆库的历史表 / 写入表 MUST 由上游 saver 的实例 `setup()` 创建，donkey MUST NOT 手写 DDL），其传递依赖 `langchain-core` 会把 `langsmith` **安装到磁盘** —— 实测导入上游 saver 新增 471 个模块、langsmith 相关 **0** 个进入进程。若不加边界澄清，plan 将被迫对宪法 MUST 作单方面重新解释（违反 §6.1 宪法权威）。**影响面**：仅 N-12 / §3.2 的读法澄清，**不放宽任何 import 禁令**；受影响产物 = F001-P2 的 `plan.md`（G6 / 风险表 / R-02）、`quickstart.md` §4~§5 的 grep 自检、`spec.md` SC-017 | N-12 + F001-P2 Maintainer 裁决（2026-10-23） |
 | **[D-18]** | **短期记忆库的表数量口径** —— §3.1 表格原写"单文件双表"，实为 **3 张表 + 2 个索引**：`checkpoints` / `writes`（上游 `langgraph-checkpoint-sqlite` 的 `SqliteSaver` 拥有）+ `sessions_metadata`（donkey 自管，含 `idx_sessions_metadata_title` / `idx_sessions_metadata_updated_at` 两个索引）。权威结构定义见 `harness/report/sessions_sqlite表结构一览.md` §2.2 与 §7（5 项健康断言）。**本条只澄清 §3.1 表格措辞，不放宽任何约束**：F002-P2 的 `SqliteSchemaError`（exit 16）5 项断言口径不变。**同源措辞已一并同步**（原「单文件双表」在 3 处遗留，现全部改为「单文件三表两索引」）：① 本宪法 §3.1.1 首条的标签；② 立项书 §4.6.3「模板预创建」行与「`sessions.sqlite3` 单文件三表两索引设计」小节（含其「承载三张表」「三张表互不干扰」两句）；③ 宪法 §3.1 表格（本条前半段所述）。各处**表数 / 索引数 / 字段 / 断言口径逐字未动**，仅标签与「两套表 → 三张表」的计数措辞对齐 | 立项书 §5.5.3 + `sessions_sqlite表结构一览.md` §2.2 / §7 |
 | **[D-19]** | **N-01 的边界澄清 —— "Python 入口文件"指*智能体入口***：N-01 / D-10 / §2.6 / §3.2 所禁的"任何 Python 入口文件"，指**能直接启动智能体的文件**（`agent.py` / `main.py` 这类）；Skill **第三层附属资源目录**（`skills/<name>/scripts/` 等）下的**普通用户脚本**（如 `skills/example/scripts/example.py`）**不属**该范畴 —— 它是**用户代码路径**下的普通脚本，唯一用途是"被内置命令工具调用并打印一行输出"，智能体的唯一官方入口仍是 `donkey.core.api.create_agent`。**动机**：F001-P3 交付的示例 Skill 需以"第三层可执行脚本"展示"模型如何按需调用附属资源"，该脚本必须保留 `if __name__ == "__main__": sys.exit(main())` 入口块（与源提示词模板逐字一致）；若按 N-01 的字面口径禁止一切入口块，则该示例无法演示"被调用"这一语义，或必须偏离源模板正文。**影响评估**：仅 F001-P3（`specs/001-donkey-init-workspace/phase-3-builtin-tools/`）的 `spec.md` FR-050 / Edge Cases「阶段边界类」/ Phase 元信息「治理依据」行、`plan.md` 的 G14 与 Complexity Tracking、`tasks.md` 的 T016 / T046 与 T094 的持久不变量口径 —— 均为**登记与引用**层面，**不改动任何需求层语义**（入口块仍 MUST 保留）；工作区内 MUST NOT 出现 `agent.py` / `main.py` 这条**持久不变量**不变。**迁移路径**：本条经 §6.3 **例外 E-02** 临时授权；E-02 到期（见其过期时间）时须正式纳入宪法（修订本条或新增 D-xx），或移除该演示脚本的入口块 —— 两者择一，由 Maintainer 裁决。**✅ 已正式化（2026-10-23，Maintainer 裁决「正式纳入宪法」）**：E-02 到期时选**第一条**路径 —— 本条**自此即为宪法正式条款，不再依赖任何临时例外**（E-02 转为历史登记，临时授权阶段结束）；第二条路径（移除演示脚本的入口块）**未被采用**（会与 F001-P3 `spec.md` FR-050「MUST NOT 被改写成无入口块的形态」冲突）。**正式化后本条的口径一字未改**：入口块仍 MUST 保留、三条范围边界（MUST NOT 位于 `tools/` 目录 / MUST NOT 命名为 `agent.py` · `main.py` / MUST NOT 承担"创建智能体"职责）仍适用、"工作区内 MUST NOT 出现 `agent.py` / `main.py`"这条持久不变量仍成立 | 立项书 §3.4 + N-01 / D-10 的立法目的 + F001-P3 Maintainer 裁决（2026-10-23） |
+| **[D-20]** | **元信息命令豁免 F 编号登记** —— 版本号查询不可缺少但不属于核心功能，套用 F 编号会污染 §4.2 的"核心功能"语义与 §4.5 的图版本口径。**影响面**：宪法 §4.2 新增「元信息命令豁免」小节（§4.2.1）+ §4.3 的**两处**限定语（「（**核心功能的**一级命令已被 F 编号锁死；元信息命令按 §4.2 豁免）」+ v1 baseline 句的「**（元信息命令按 §4.2 豁免）**」）+ `specs/001-donkey-init-workspace/phase-4-cli-version/` 全套（F001-P4 `cli_version` Phase）。**不变项**：F001-P1 / P2 / P3 的 FR / SC 编号与断言**一律不动**；§4.3 的规则 A / 规则 B 两张表逐字未动。**迁移路径**：无（纯新增能力，不改变任何既有行为）。**边界**：元信息命令一旦开始承载可失败的业务能力（需要 Error class / exit code 段位 / 库 API），MUST 先按 §6.2 取得 F 编号 | 立项书 §1.5.2 + §3.2.1 + F001-P4 Maintainer 裁决（2026-10-30） |
+| **[D-21]** | **工作区清单删除"版本号"字段、`donkey_version` 改动态取值** —— 原清单的 `"version": 1`（清单**格式版本**，整数）与 `donkey_version`（donkey **软件版本**，字符串）并排，读作"两个打架的版本号"；而前者**全仓无人读取**（`init.py` 读的是**包内模板清单**的同名 `version`，是另一个文件、另一个含义，且**被强制校验**）。真正被使用的是 `donkey_version` —— 它是 F002 `donkey load` 迁移提示的唯一依据。**影响面**：① 宪法 D-01（四字段 → **三字段**）与 D-03（"格式版本号" → "**donkey 版本号**"，并保留"将来结构不兼容演进时 MUST 重新引入显式格式版本"的兜底）；② `donkey/core/workspace/manifest.py`（删 `_MANIFEST_VERSION` 与 `"version"` 字段；`donkey_version` 改为 `donkey.core.version.resolve_version()` **动态取值**）；③ `tests/unit/test_template_skeleton.py` 的**清单字段断言**（4 处断言逐条改写，见该文件`test_manifest_field_minimal` 的「断言改写登记」注记）与 F001-P2 spec 的 FR-019 / FR-021；④ `harness/features/立项书.md` §1.3 目标 5 / Q-07 / §4.6.1 字段描述；⑤ `harness/features/README.md` §5 的 **F002 必读备忘录**。**不变项**：F001-P1 / P2 / P3 的 **FR / SC 编号**一律不动；仅上述**断言**按宪法 §4.3 的"显式登记改写"机制改写；**包内模板清单** `donkey/core/workspace/templates/manifest.json` 的 `version` 字段**逐字不动**（它是**被强制校验**的真实格式契约，与本条无关）。**动机**：① 消除"两个 version 并排"的阅读歧义；② 修掉硬编码的真实缺陷 —— 版本 bump 后**新建**的工作区仍记旧版本号，会让 F002 的迁移提示**误判**工作区陈旧（F001-P2 FR-021 自身已预留该演进路径："将来若改为动态获取，MUST 使用包元数据查询方式"；其"循环依赖风险"的理由因 `donkey.core.version` 的诞生而**已不复存在** —— `donkey/__init__.py` 零 import）。**迁移路径**：存量工作区的清单里可能仍带 `"version": 1` —— 读取端原样返回字典、**不解析**该键，故**不影响任何读路径**；`donkey init --force` 重写时该键被自然清除（归一到三字段形态）。**边界**：删除格式版本号意味着**清单结构失去显式的演进标记** —— 故 D-03 与 F002 备忘录 MUST 写明：将来若清单结构出现**不兼容**演进（如 F002 引入 workspace 快照），MUST **重新引入**显式格式版本并同步 D-03 | 立项书 §1.2.2 P1 + §1.3 目标 5 + F001-P2 FR-019 / FR-021 + F001-P4 Maintainer 裁决（2026-10-30） |
+| **[D-22]** | **`donkey init` 的执行报告改为「摘要 + 逐项明细」，计数按「对象 × 动作」分解** —— 原摘要的 `templates=54` 与 `created=48` 是**两个口径**（清单条目总数 vs 文件型条目数），差额 6 个目录条目**在输出里不可见**，用户无法自行对账；且 `created` 在 `--force` 下把**覆盖**并入**新建**，两个动作不可区分。**影响面**：① **库 API 契约 v2** —— `InitResult` 新增 `files_overwritten` / `dirs_created` / `dirs_skipped` / `items` 四个字段（v1 的六个字段**逐字保留、顺序不变**），并引入 `INIT_RESULT_CONTRACT_VERSION = 2`（F001-P1 FR-006 要求"字段语义不得在本阶段之后**无版本号**变更"）；② `core/workspace/init.py` 的 `render_templates` 由返回 `(files_created, files_skipped)` 改为返回**逐项明细** `list[InitItem]`（`path` / `kind` / `action`），各计数由明细**投影**而来（**单一真相源**）；③ `cli/cli_client.py` 的摘要扩为**九个字段**并新增**逐项明细**（每条目一行，走 stdout）；④ F001-P1 / P2 / P3 的**既有断言改写**（P1 单测 1 处、P2 单测 8 处 + e2e 2 处、P3 单测 1 处 + e2e 3 处），逐条登记在各文件内。**不变项**：F001-P1 / P2 / P3 的 **FR / SC 编号**一律不动；`donkey init` 的**参数面**（仅 `path` + `--force`）不动 —— 故明细**恒定输出**、MUST NOT 新增 `--quiet` / `--verbose`。**动机**：① 让输出的各数**算术自洽**（`templates` == 五类计数之和）；② 让"这次到底动了哪些文件"**可见**（逐项明细）；③ 让"新建 / 覆盖 / 跳过"三个动作**分列**（`--force` 的 47 个是**覆盖**而非新建）。**迁移路径**：解析摘要的脚本 MUST 由 `created=` / `skipped=` 改读 `files_created=` / `files_skipped=`；`--force` 情形的 `files_created` 由 47 归位为 **0**（覆盖另计入 `files_overwritten`）—— 这是 FR-006 字面口径「本次新建文件数」的**归位**，非新语义。**边界**：目录条目**永不**"覆盖"（既有目录一律保留不动），故只有 `dirs_created` / `dirs_skipped` 两态；目录的"新建/跳过"以**本次运行开始前**的存在状态判定（否则会被其子条目的父目录创建提前建出，导致结果依赖清单顺序） | 立项书 §4.6.1 + F001-P1 FR-006 / FR-003 + F001-P3 FR-068 改写机制 + Maintainer 裁决（2026-10-30） |
 
 ---
 

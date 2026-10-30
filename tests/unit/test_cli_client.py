@@ -58,28 +58,50 @@ def test_main_unregistered_exception_falls_back_to_1(
 
 
 def test_cli_force_warning_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """带 ``--force`` 时 stdout 额外有一行强制清空提示；不带时**没有**该行。
+    """带 ``--force`` 时 stdout 末尾多一行强制清空提示；不带时**没有**该行。
 
-    提示 MUST 与通用摘要**分行**、MUST NOT 挤占摘要的六个字段
-    （spec FR-068 / SC-019）。
+    提示 MUST 与通用摘要**分行**、MUST NOT 挤占摘要的字段
+    （spec FR-068 / SC-019），且 MUST 置于**逐项明细之后**（明细恒定 54 行，
+    警告若在其之前会滚出终端视野 —— 宪法 [D-22]）。
+
+    > **断言改写登记（宪法 [D-22] · 2026-10-30 · Maintainer 裁决）**：原断言
+    > 为「不带 --force 时 stdout **恰好 1 行**」+「带 --force 时**恰好 2 行**」
+    > + 摘要**六个字段**名 —— 现输出为「摘要 1 行 + 明细 1 行 + N 条明细
+    > （+ --force 时的警告 1 行）」，摘要字段亦由六个扩为九个。
     """
     workspace = tmp_path / "ws"
-    summary_fields = ("workspace=", "name=", "force=", "templates=", "created=", "skipped=")
+    summary_fields = (
+        "workspace=",
+        "name=",
+        "force=",
+        "templates=",
+        "files_created=",
+        "files_overwritten=",
+        "files_skipped=",
+        "dirs_created=",
+        "dirs_skipped=",
+    )
 
     assert cli_client.main(["init", str(workspace)]) == 0
     captured = capsys.readouterr()
-    assert len(captured.out.splitlines()) == 1
+    lines = captured.out.splitlines()
+    # 摘要 1 行 + 明细图例 1 行 + N 条明细
+    assert lines[0].startswith("[donkey init] workspace=")
+    assert "逐项明细" in lines[1]
+    assert len(lines) > 2
     assert "清空" not in captured.out
     for field in summary_fields:
-        assert field in captured.out, field
+        assert field in lines[0], field
 
     assert cli_client.main(["init", str(workspace), "--force"]) == 0
     captured = capsys.readouterr()
     lines = captured.out.splitlines()
-    assert len(lines) == 2
-    warning = lines[1]
+    warning = lines[-1]
     # 文案 MUST 同时涵盖"已清空 / 已重建"两种情形
     assert "清空" in warning
     assert "重建" in warning
+    # 警告 MUST 置于明细之后
+    assert "逐项明细" in lines[1]
+    assert len(lines) > 3
     for field in summary_fields:
-        assert field in captured.out, field
+        assert field in lines[0], field

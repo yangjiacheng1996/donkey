@@ -19,13 +19,16 @@ import re
 import sqlite3
 from dataclasses import fields
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
-from donkey.core.api import init_workspace
+from donkey.core.api import INIT_RESULT_CONTRACT_VERSION, init_workspace
 from donkey.core.exceptions import PathPermissionError, TemplateGenerationError
+from donkey.core.version import resolve_version
 from donkey.core.workspace.init import (
     DEFAULT_TEMPLATES_ROOT,
+    InitItem,
     load_template_manifest,
     render_templates,
 )
@@ -185,18 +188,55 @@ def test_manifest_refresh_force(tmp_path: Path) -> None:
     assert json.loads(manifest_file.read_text(encoding="utf-8")) == second
 
 
+
+class _Counts(NamedTuple):
+    """逐项明细的计数投影（文件 / 目录 × 新建 / 覆盖 / 跳过）。"""
+
+    files_created: int
+    files_overwritten: int
+    files_skipped: int
+    dirs_created: int
+    dirs_skipped: int
+
+
+def _project(items: list[InitItem]) -> _Counts:
+    """把 ``render_templates`` 的逐项明细投影成五个计数。
+
+    > **断言改写登记（宪法 [D-22] · 2026-10-30 · Maintainer 裁决）**：
+    > ``render_templates`` 原先返回 ``(files_created, files_skipped)`` 两个计数，
+    > 且 ``--force`` 下的**覆盖**被并入 ``created`` —— "新建"与"覆盖"两个动作
+    > **不可区分**。现返回逐项明细，断言一律按「对象 × 动作」投影。
+    """
+    return _Counts(
+        files_created=sum(1 for i in items if i.kind == "file" and i.action == "created"),
+        files_overwritten=sum(
+            1 for i in items if i.kind == "file" and i.action == "overwritten"
+        ),
+        files_skipped=sum(1 for i in items if i.kind == "file" and i.action == "skipped"),
+        dirs_created=sum(1 for i in items if i.kind == "dir" and i.action == "created"),
+        dirs_skipped=sum(1 for i in items if i.kind == "dir" and i.action == "skipped"),
+    )
+
+
 def test_manifest_field_minimal(tmp_path: Path) -> None:
-    """FR-055 第 15 项：清单字段恰为四项，且取值符合契约（FR-019 / FR-021）。"""
+    """FR-055 第 15 项：清单字段恰为三项，且取值符合契约（FR-019 / FR-021）。
+
+    > **断言改写登记（宪法 [D-21] · 2026-10-30 · Maintainer 裁决）**：
+    > 原断言为「字段恰为**四**项」且含 ``version == 1``（整数）—— 该字段
+    > **无人读取**且与 ``donkey_version`` 并排时读作"两个打架的版本号"，已
+    > **删除**（F001-P2 FR-019 的"版本号"一项随之失效）。
+    > 同时 ``donkey_version`` 由硬编码改为**动态取值**（F001-P2 FR-021
+    > 预留的演进路径）—— 故此处 MUST NOT 断言字面量 ``"0.1.0"``，
+    > 改为与**运行时**版本比对（否则版本 bump 后本断言会假失败）。
+    """
     workspace = tmp_path / "ws"
     workspace.mkdir()
 
     written = write_workspace_manifest(workspace, "ws", False)
 
-    assert set(written.keys()) == {"version", "name", "created_at", "donkey_version"}
-    assert written["version"] == 1
-    assert isinstance(written["version"], int)
+    assert set(written.keys()) == {"name", "created_at", "donkey_version"}
     assert written["name"] == "ws"
-    assert written["donkey_version"] == "0.1.0"
+    assert written["donkey_version"] == resolve_version()
 
 
 def test_manifest_json_encoding(tmp_path: Path) -> None:
@@ -211,7 +251,7 @@ def test_manifest_json_encoding(tmp_path: Path) -> None:
     text = raw.decode("utf-8")
     assert "我的 工作区 ✨" in text
     assert "\\u" not in text
-    assert '\n  "version"' in text
+    assert '\n  "name"' in text
 
 
 def test_manifest_read_invalid_json_raises(tmp_path: Path) -> None:
@@ -235,7 +275,7 @@ def test_manifest_force_overwrites_invalid_json(tmp_path: Path) -> None:
 
     written = write_workspace_manifest(workspace, "ws", True)
 
-    assert set(written.keys()) == {"version", "name", "created_at", "donkey_version"}
+    assert set(written.keys()) == {"name", "created_at", "donkey_version"}
     assert json.loads(manifest_file.read_text(encoding="utf-8")) == written
 
 
@@ -257,7 +297,7 @@ def test_ensure_manifest_equivalent_to_write(tmp_path: Path) -> None:
 
         written = func(workspace, "ws", True)
 
-        assert set(written.keys()) == {"version", "name", "created_at", "donkey_version"}
+        assert set(written.keys()) == {"name", "created_at", "donkey_version"}
         assert json.loads(
             (workspace / WORKSPACE_MANIFEST_FILENAME).read_text(encoding="utf-8")
         ) == written
@@ -289,12 +329,14 @@ def test_render_new_file(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     workspace.mkdir()
 
-    created, skipped = render_templates(
-        workspace, "ws", False, load_template_manifest(root / "manifest.json"), root
+    counts = _project(
+        render_templates(
+            workspace, "ws", False, load_template_manifest(root / "manifest.json"), root
+        )
     )
 
-    assert created == 1
-    assert skipped == 0
+    assert counts.files_created == 1
+    assert counts.files_skipped == 0
     assert (workspace / "instruction.md").read_text(encoding="utf-8") == "出厂内容"
 
 
@@ -311,12 +353,14 @@ def test_render_skip_existing_no_force(tmp_path: Path) -> None:
     target.write_text("用户改写的内容", encoding="utf-8")
     before_mtime = target.stat().st_mtime
 
-    created, skipped = render_templates(
-        workspace, "ws", False, load_template_manifest(root / "manifest.json"), root
+    counts = _project(
+        render_templates(
+            workspace, "ws", False, load_template_manifest(root / "manifest.json"), root
+        )
     )
 
-    assert created == 0
-    assert skipped == 1
+    assert counts.files_created == 0
+    assert counts.files_skipped == 1
     assert target.read_text(encoding="utf-8") == "用户改写的内容"
     assert target.stat().st_mtime == before_mtime
 
@@ -333,12 +377,16 @@ def test_render_force_overwrite(tmp_path: Path) -> None:
     target = workspace / "instruction.md"
     target.write_text("用户改写的内容", encoding="utf-8")
 
-    created, skipped = render_templates(
-        workspace, "ws", True, load_template_manifest(root / "manifest.json"), root
+    counts = _project(
+        render_templates(
+            workspace, "ws", True, load_template_manifest(root / "manifest.json"), root
+        )
     )
 
-    assert created == 1
-    assert skipped == 0
+    # **覆盖 ≠ 新建** —— 强制标志下的重建计入 ``files_overwritten``（[D-22]）。
+    assert counts.files_created == 0
+    assert counts.files_overwritten == 1
+    assert counts.files_skipped == 0
     assert target.read_text(encoding="utf-8") == "出厂内容"
 
 
@@ -358,8 +406,10 @@ def test_render_force_directory(tmp_path: Path) -> None:
     (example_dir / "SKILL.md").write_text("用户改写的 SKILL", encoding="utf-8")
     (example_dir / "my_notes.md").write_text("清单外用户文件", encoding="utf-8")
 
-    created, skipped = render_templates(
-        workspace, "ws", True, load_template_manifest(root / "manifest.json"), root
+    counts = _project(
+        render_templates(
+            workspace, "ws", True, load_template_manifest(root / "manifest.json"), root
+        )
     )
 
     # 目录本身不删、清单外文件不删
@@ -367,7 +417,10 @@ def test_render_force_directory(tmp_path: Path) -> None:
     assert (example_dir / "my_notes.md").read_text(encoding="utf-8") == "清单外用户文件"
     # 清单内文件由其自身的条目负责重建为出厂内容
     assert (example_dir / "SKILL.md").read_text(encoding="utf-8") == "出厂 SKILL 正文"
-    assert (created, skipped) == (1, 0)
+    # 清单内文件 = 覆盖；目录条目 = 跳过（既有目录**永不**"覆盖"，[D-22]）
+    assert counts.files_overwritten == 1
+    assert counts.files_created == 0
+    assert counts.dirs_skipped == 1
 
 
 def test_render_skip_user_content(tmp_path: Path) -> None:
@@ -501,7 +554,7 @@ def test_render_duplicate_manifest_entry(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     workspace.mkdir()
 
-    created, skipped = render_templates(workspace, "ws", False, entries, root)
+    counts = _project(render_templates(workspace, "ws", False, entries, root))
 
     unique_paths = {entry["path"] for entry in entries}
     unique_file_paths = {path for path in unique_paths if path not in {"thing"}}
@@ -509,8 +562,9 @@ def test_render_duplicate_manifest_entry(tmp_path: Path) -> None:
     assert len(entries) == 5
     assert len(unique_paths) == 3
     # 唯一文件型路径只计一次
-    assert created + skipped == len(unique_file_paths)
-    assert (created, skipped) == (2, 0)
+    assert counts.files_created + counts.files_skipped == len(unique_file_paths)
+    assert counts.files_created == 2
+    assert counts.files_skipped == 0
     # 后者胜出 → "thing" 是目录（最后一条 format 为 directory）
     assert (workspace / "thing").is_dir()
     assert not (workspace / "thing").is_file()
@@ -607,9 +661,10 @@ def test_load_template_manifest_format_omitted_defaults_to_text(tmp_path: Path) 
     entries = load_template_manifest(root / "manifest.json")
 
     assert entries == [{"path": "plain.md"}]
-    created, skipped = render_templates(workspace, "ws", False, entries, root)
+    counts = _project(render_templates(workspace, "ws", False, entries, root))
 
-    assert (created, skipped) == (1, 0)
+    assert counts.files_created == 1
+    assert counts.files_skipped == 0
     assert (workspace / "plain.md").read_text(encoding="utf-8") == "纯文本出厂内容"
 
 
@@ -705,10 +760,17 @@ def test_init_workspace_counts_and_manifest(tmp_path: Path) -> None:
     assert result.templates_loaded == len(entries)
     assert result.files_created == len(file_type_entries)
     assert result.files_skipped == 0
+    assert result.files_overwritten == 0
+    assert result.dirs_created == 6
+    assert result.dirs_skipped == 0
+    assert len(result.items) == len(entries)
     assert (workspace / WORKSPACE_MANIFEST_FILENAME).is_file()
     manifest = read_workspace_manifest(workspace)
     assert manifest is not None
     assert manifest["name"] == workspace.name
+    # **库 API 契约 v2**（宪法 [D-22]）—— v1 的六个字段**逐字保留、顺序不变**，
+    # 新增四个计数 + 逐项明细；契约版本号 MUST 同步递增（FR-006 要求"不得
+    # 在本阶段之后**无版本号**变更"）。
     assert [f.name for f in fields(InitResult)] == [
         "workspace_path",
         "name",
@@ -716,7 +778,12 @@ def test_init_workspace_counts_and_manifest(tmp_path: Path) -> None:
         "templates_loaded",
         "files_created",
         "files_skipped",
+        "files_overwritten",
+        "dirs_created",
+        "dirs_skipped",
+        "items",
     ]
+    assert INIT_RESULT_CONTRACT_VERSION == 2
 
 
 #: 宪法 N-12：workspace 内容 MUST NOT 含任何智能体框架的可观测性后端形态。
@@ -1029,11 +1096,14 @@ def test_render_missing_file_is_recreated(tmp_path: Path) -> None:
     target.write_text("用户改写的内容", encoding="utf-8")
     target.unlink()
 
-    created, skipped = render_templates(
-        workspace, "ws", False, load_template_manifest(root / "manifest.json"), root
+    counts = _project(
+        render_templates(
+            workspace, "ws", False, load_template_manifest(root / "manifest.json"), root
+        )
     )
 
-    assert (created, skipped) == (1, 0)
+    assert counts.files_created == 1
+    assert counts.files_skipped == 0
     assert target.read_text(encoding="utf-8") == "出厂内容"
 
 

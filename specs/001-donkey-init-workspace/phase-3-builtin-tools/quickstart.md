@@ -40,11 +40,17 @@ PY
 rm -rf /tmp/p3ws && donkey init /tmp/p3ws
 echo "--- 工具目录 ---"; ls -1 /tmp/p3ws/tools
 # 期望：README.md  __init__.py  changes.py  commandline.py  filesystem.py  webfetch.py
-echo "--- 清单计数 ---"; donkey init /tmp/p3ws | tail -1
-# 期望：templates=54 created=48 skipped=0   ← 二次 init 则是 templates=54 created=0 skipped=48
+echo "--- 清单计数 ---"; donkey init /tmp/p3ws | head -1
+# 期望：templates=54 files_created=48 files_overwritten=0 files_skipped=0 dirs_created=6 dirs_skipped=0
+#       ← 二次 init 则是 templates=54 files_created=0 files_skipped=48 dirs_created=0 dirs_skipped=6
 ```
 
-**要点**：首次 init 的计数是 `54 / 48 / 0`；**二次** init 是 `54 / 0 / 48`（幂等，MUST NOT 改动已存在文件）。
+**要点**：首次 init 的计数是 `54 / 48 / 0 / 0 / 6 / 0`；**二次** init 是 `54 / 0 / 0 / 48 / 0 / 6`
+（幂等，MUST NOT 改动已存在文件）。
+
+> **计数口径变更（2026-10-30 · 宪法 [D-22]）**：摘要按「**对象**（文件 / 目录）×
+> **动作**（新建 / 覆盖 / 跳过）」分解 —— 摘要**首行**是九字段摘要，其后是**逐项明细**
+> （每个清单条目一行，恒定 54 行）；故取摘要 MUST 用 `head -1`（`tail -1` 取到的是明细末行）。
 
 ---
 
@@ -253,7 +259,8 @@ echo "--- 契约库（必须保留用户改动）---"; tail -1 /tmp/p3ws2/tools/
 echo "--- 用户自写工具（必须仍在）---"; cat /tmp/p3ws2/tools/my_tool.py
 echo "--- 计数（契约库被豁免 → skipped=1）---"
 ```
-**期望**：契约库保留用户的追加行；`my_tool.py` 仍在；`--force` 的计数为 `created=47 skipped=1`。
+**期望**：契约库保留用户的追加行；`my_tool.py` 仍在；`--force` 的计数为
+`files_created=0 files_overwritten=47 files_skipped=1`（**47 是"覆盖"不是"新建"** —— 宪法 [D-22]）。
 
 > **这一条是本 Phase 最容易回归的行为** —— 它由 R-07 的编排层豁免实现，且 MUST NOT 削弱 P2 通则对其余条目的作用。
 

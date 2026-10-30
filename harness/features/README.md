@@ -419,7 +419,7 @@ templates/
 > | **F001-P2** | +43 | 46 | 其余 7 个文本模板 + 6 个目录条目（`tools/` `mcp/` `skills/` `skills/example/` `memory/` **`providers/`**）+ 3 个 sqlite3 模板 + **`providers/README.md` + 26 个 provider stub（`providers/<id>.toml`）** |
 > | **F001-P3** | +8 | 54 | `tools/__init__.py` + **`tools/changes.py`（变更记录契约库，diff-ready 地基）** + 3 个内置 tool + 3 个 Skills Level 3 示例 |
 >
-> **包内 `templates/manifest.json` ≠ workspace 根的 `manifest.json`**：前者是**模板文件清单**（装在 donkey 包内，驱动 `render_templates` 幂等渲染）；后者是 **D-01 的 workspace manifest**（落在 `<workspace>/manifest.json`，含 `version` / `name` / `created_at` / `donkey_version` 4 字段，由 `core/workspace/manifest.py` 单独写入，**不**进模板清单）。
+> **包内 `templates/manifest.json` ≠ workspace 根的 `manifest.json`**：前者是**模板文件清单**（装在 donkey 包内，驱动 `render_templates` 幂等渲染）；后者是 **D-01 的 workspace manifest**（落在 `<workspace>/manifest.json`，含 `name` / `created_at` / `donkey_version` **3 字段**（原 `version` 字段已于 2026-10-30 删除 —— 宪法 [D-21]），由 `core/workspace/manifest.py` 单独写入，**不**进模板清单）。
 
 > **文本模板 vs sqlite3 模板**：`templates/` 下文本类模板（`*.md` / `*.toml` / `*.json` / `*.py`）以文本源码形式随包分发；sqlite3 类模板（`memory/*.sqlite3`）由 `core/workspace/sqlite3_templates.py` 在 `donkey init` 阶段**程序化构造**：
 >
@@ -478,6 +478,7 @@ templates/
 
 **实现要点**：
 - `core/api.py`：`init_workspace(path, name=None, force=False) -> InitResult` 函数签名稳定 + **P1 最小实现**（校验 + **创建 workspace 根目录**；**不**加载模板清单、**不**渲染模板内容——均属 P2 域）。
+  > **库 API 契约 v2（宪法 [D-22]）**：`InitResult` 在 v1 六字段之后**追加** `files_overwritten` / `dirs_created` / `dirs_skipped` / `items` 四个字段（v1 字段**逐字保留、顺序不变**），并引入 `INIT_RESULT_CONTRACT_VERSION = 2`（FR-006 要求"字段语义不得**无版本号**变更"）。`files_created` 的语义**归位**为 FR-006 字面口径「本次**新建**文件数」——原先 `--force` 的**覆盖**被并入其中，现分列为 `files_overwritten`。
 - `core/workspace/init.py`：核心逻辑骨架：
   - `check_path(path) -> Path` — 解析为绝对路径，验证父目录存在；失败抛 `PathNotFoundError`；
   - `check_permission(path) -> None` — 验证当前用户对 path 有写权限；失败抛 `PathPermissionError`；
@@ -541,15 +542,17 @@ templates/
 - `core/workspace/templates/`：模板源文件（`.md.txt` / `.toml.txt` / `.json.txt`）；
 - `core/workspace/templates/manifest.json`：模板清单（列出 donkey 自动生成的所有文件路径；详见 §4.1.1）——含**文本模板**（`instruction.md` / `providers/*.toml` / `mcp/mcp.json` / `tools/*.py` 等）与 **sqlite3 模板**（`memory/sessions.sqlite3` / `memory/store.sqlite3` / `memory/knowledge.sqlite3`，由 `core/workspace/sqlite3_templates.py` 的 schema builder 在 init 阶段程序化构造；**不**在包内携带二进制 sqlite3 文件，避免 schema 漂移）；
 - `core/workspace/init.py`：新增 `render_templates(path, name, force)` 函数：
+  - **返回逐项明细** `list[InitItem]`（`path` / `kind` / `action`）—— 各计数由明细**投影**而来
+    （**单一真相源**；宪法 [D-22]）；
   - 遍历 `manifest.json` 中的每个模板路径（含文本模板 + sqlite3 模板）；
   - **不传 `force`**：仅当文件不存在时创建；已存在跳过；
   - **传 `force`**：先 `delete` 再 `create`；sqlite3 模板调用 schema builder 重建 SqliteSaver 表 / `sessions_metadata` 表 / SqliteStore 表 / knowledge 空文件；
   - 用户内容（非模板清单内）**不动**（包括用户自定义 `tools/my_tool.py` / 用户自建 `media/` 目录等）；
   - 任一步骤失败 → 抛 `TemplateGenerationError` 或 `BuiltinToolGenerationError`（按 §3.1 表）。
-- `core/workspace/manifest.py`：workspace manifest 写入与解析（**D-01**：manifest 字段最少化，可仅含 `version` + `created_at` + `donkey_version`）：
+- `core/workspace/manifest.py`：workspace manifest 写入与解析（**D-01**：manifest 字段最少化，现为 `name` + `created_at` + `donkey_version` **三字段** —— 原 `version` 字段已删除，见宪法 [D-21] 与 §5.6）：
   - **不传 `force`**：若 manifest 已存在则跳过（保留原 `created_at`）；
   - **传 `force`**：刷新 `created_at` 为当前时间；
-  - 字段 `donkey_version` 记录生成本次 manifest 的 donkey 版本号（用于未来迁移提示）。
+  - 字段 `donkey_version` 记录生成本次 manifest 的 donkey 版本号（**动态取值** —— `donkey.core.version.resolve_version()`；用于未来迁移提示）。
 - 名称注入：workspace 名称（= 路径末段 `path.basename()`）注入到 `providers/default.toml` 注释、`README.md` 标题、manifest。
 
 **异常退出码**（详见 §3.1 表）：
@@ -589,7 +592,7 @@ templates/
 | 模板清单加载 | `core/workspace/init.py` → `load_template_manifest`（**未去重**的原始条目列表；schema 校验 V1~V6） | ✅ |
 | 渲染内核 | `core/workspace/init.py` → `render_templates`（按**唯一路径**去重、后者胜出；幂等三态；父目录先建 → 顺序无关） | ✅ |
 | 内部流水线 | `core/workspace/init.py` → `init_workspace_inner`（五步：校验 → 加载清单 → 建根目录 → 渲染 → 写工作区清单；步骤 ⑤ 失败**不回滚**） | ✅ |
-| 工作区清单 | `core/workspace/manifest.py`（**新增模块**）→ `write` / `read` / `ensure`（字段恰 4 项；`ensure` 与 `write` 严格等价） | ✅ |
+| 工作区清单 | `core/workspace/manifest.py`（**新增模块**）→ `write` / `read` / `ensure`（字段现为 **3 项** —— 原 4 项，2026-10-30 变更见宪法 [D-21] 与 §5.6；`ensure` 与 `write` 严格等价） | ✅ |
 | sqlite3 构造器 | `core/workspace/sqlite3_templates.py`（**新增模块**）→ `build_sessions_sqlite` / `build_store_sqlite` / `build_knowledge_sqlite` | ✅ |
 | 模板资产 | `core/workspace/templates/` → **46 条清单**（P1 的 3 条 + P2 追加 43 条）+ **37 个文本模板源**（含隐藏名 `.gitignore.txt`）；`package-data` 显式列入 `.gitignore.txt` → wheel 内齐备 | ✅ |
 | 供应商配置 | 26 份 provider stub（**脚本抽取**调研 §8.3.3~§8.3.28，逐字保留注释）+ `providers/README.md`（26 家索引）+ `providers/default.toml`（两字段出厂为空串） | ✅ |
@@ -693,6 +696,45 @@ templates/
 
 **本阶段实际使用的退出码**（SC-010）：`{0, 1, 2, 3, 4}` —— `1` = 输入 / 路径 / 参数用法不合法；`2` = 权限不足；`3` = 模板骨架生成失败；`4` = 内置工具 / Skills example 生成失败。
 
+### §4.8 `donkey init` 的执行报告（2026-10-30 变更 · 宪法 [D-22]）
+
+> **本节是 `donkey init` 输出形态的权威口径** —— 摘要 + 逐项明细，计数按
+> 「**操作对象**（文件 / 目录）× **动作**（新建 / 覆盖 / 跳过）」分解。
+
+**输出形态**（stdout，三段）：
+
+```text
+[donkey init] workspace=<绝对路径> name=<工作区名> force=<true|false> templates=54 files_created=48 files_overwritten=0 files_skipped=0 dirs_created=6 dirs_skipped=0
+[donkey init] 逐项明细（+ 新建 / ~ 覆盖 / - 跳过；路径以 / 结尾者 = 目录条目）：
+  + instruction.md
+  + providers/default.toml
+  ...
+  + tools/
+  - tools/my_tool.py
+[donkey init] 警告：……（仅 --force 时出现，且 MUST 置于明细**之后**）
+```
+
+**计数口径**（九个字段，算术自洽：`templates` == 五类计数之和）：
+
+| 字段 | 含义 | 全新 init | 二次 init | `--force` |
+|---|---|---|---|---|
+| `templates` | 清单条目总数（原始列表长度） | 54 | 54 | 54 |
+| `files_created` | 文件 · **新建** | 48 | 0 | **0** |
+| `files_overwritten` | 文件 · **覆盖**（已存在 + `--force` → 删除后重建） | 0 | 0 | **47** |
+| `files_skipped` | 文件 · **跳过**（已存在且未强制 → 完全不动） | 0 | 48 | 1（契约库豁免） |
+| `dirs_created` | 目录 · **新建** | 6 | 0 | 0 |
+| `dirs_skipped` | 目录 · **跳过**（既有目录一律保留不变） | 0 | 6 | 6 |
+
+**关键口径**：
+
+- **目录永不"覆盖"** —— 既有目录一律保留不动，其内文件的重置由各自的条目负责；
+- 目录的"新建 / 跳过"以**本次运行开始前**的存在状态判定（否则目录会被其**子条目**的父目录创建
+  提前建出 → 结果依赖清单顺序）；
+- **明细恒定输出**（54 行）—— `init` 的参数面被 F001-P1 FR-003 锁死（仅 `path` + `--force`），
+  MUST NOT 新增 `--quiet` / `--verbose`；
+- **迁移路径**：解析摘要的脚本 MUST 由 `created=` / `skipped=` 改读 `files_created=` / `files_skipped=`；
+  `--force` 情形的 `files_created` 由 47 **归位**为 0（覆盖另计入 `files_overwritten`）。
+
 ---
 
 ## §5 F002 `donkey load` —— 详细设计
@@ -731,6 +773,50 @@ templates/
 
 - **核心逻辑**：扫描 `tools/*.py` 跑 `importlib` 验证 `@tool` 可加载；跑自研 Skills loader 验证 SKILL.md 可加载；用 `MCPAdapter` 拉起 server 验证可达。
 - **退出条件**：故意写错的 `tools/*.py`（语法错）→ exit 17；损坏的 SKILL.md → exit 18；填错的 mcp server URL → exit 19。
+
+### §5.6 F002 必读备忘录 · 工作区清单格式（2026-10-30 变更 · 宪法 [D-21]）
+
+> **本节是 F002 `donkey load` 的开工前置条件** —— 清单格式已于 2026-10-30 变更（宪法第 5 章
+> **[D-21]**，Maintainer 裁决）。**F002-P1 ~ P002-P3 的 spec MUST 先承接本节的口径**。
+
+#### (1) 工作区清单的现行字段集 = **三项**
+
+```json
+{
+  "name": "dk_manual",
+  "created_at": "2026-10-30T07:35:48.494962+00:00",
+  "donkey_version": "0.1.0"
+}
+```
+
+| 变更 | 原 | 现 | 授权 |
+|---|---|---|---|
+| **"版本号"字段** | `"version": 1`（整数，清单**格式版本**） | **已删除** | 宪法 [D-21]（D-01 四字段 → 三字段） |
+| **`donkey_version`** | 硬编码 `"0.1.0"` | **动态取值** —— `donkey.core.version.resolve_version()` | 宪法 [D-21]；F001-P2 FR-021 **自身预留**的演进路径 |
+
+- **删除理由**：该字段**全仓无人读取**（`init.py` 读的是**包内模板清单**的同名 `version` —— 另一个文件、
+  另一个含义，且**被强制校验**），且与 `donkey_version` 并排时读作"两个打架的版本号"。
+- **动态化的理由**：硬编码的真实代价是 —— 版本 bump 后**新建**的工作区仍记旧版本号 → F002 的
+  **迁移提示会误判**工作区陈旧。F002 的迁移判据 MUST 直接用 `manifest.donkey_version` 对比运行时版本。
+- **存量兼容**：旧工作区的清单里可能仍带 `"version": 1` —— 读取端原样返回字典、**不解析**该键，
+  故**不影响任何读路径**；`donkey init --force` 重写时该键被自然清除（归一到三字段形态）。
+  → **F002 的清单读取 MUST NOT 假设字段集恰好是三项**（存量工作区可能是四键）。
+
+#### (2) 快照设计约束（workspace 快照 —— 用户 2026-10-30 提出的方向）
+
+> **动机**：`donkey load` 通过后把 workspace 的**快照**写进清单，防止用户之后又改了 workspace，
+> 导致 `donkey run`（F004）失败。
+
+| # | 约束 | 理由 |
+|---|---|---|
+| **S-1** | 快照 MUST **排除 `memory/` 下的全部内容** —— 3 个 sqlite3（`sessions.sqlite3` / `store.sqlite3` / `knowledge.sqlite3`）+ `-wal` / `-shm` 边车文件 | 它们**每次会话写入都变**（`checkpoints` / `writes` / `sessions_metadata` 行）→ 快照若覆盖它们，`donkey run` **每次**都会报"工作区被改过" |
+| **S-2** | 快照 MUST 只覆盖**代码与模板资产** —— `tools/` / `skills/` / `mcp/` / `providers/` / `instruction.md` / `README.md` | 这些才是用户会改、且改动会影响 `run` 的东西 |
+| **S-3** | 快照 MUST 记录**算法与格式标识**（如 `algo` / `snapshot_version`） | 快照**自身**的格式也会演进（先覆盖 `tools/`、后覆盖 `skills/`）→ 读端必须能判断快照是哪一版 |
+| **S-4** | 若快照字段引入后清单结构出现**不兼容**演进，MUST **重新引入显式清单格式版本**并同步宪法 D-03 | 删除"版本号"字段 = 清单结构**失去显式的演进标记**；这条是 D-03 原有兜底作用的**承接方**（宪法 [D-21] 边界条款） |
+
+> ⚠️ **已知的方法论缺口**（F002 需在 spec 中处置）：基于**文件自身**的完整性检查，**挡不住"用户删掉快照字段"**
+> —— 而"防用户手改 workspace"恰恰是防手改的场景。F002 MUST 明确该防线的边界（是"尽力而为的漂移检测"
+> 还是"强完整性保证"），并在用户手册中写明。
 
 ---
 

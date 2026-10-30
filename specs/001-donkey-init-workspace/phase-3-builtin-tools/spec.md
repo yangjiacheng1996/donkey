@@ -527,8 +527,28 @@
 #### 阶段边界断言的显式改写（实现要点 §3.5）
 
 - **FR-068**: 本 Phase MUST **显式改写** F001-P2 中编码了**阶段边界**的断言组 ——（a）单元测试侧："清单条数 / 文件型条数 / 落地文件数 / **落地目录数**"的**绝对值断言** MUST 改为**动态口径**（按加载器的实际返回值计算），绝对值 **54 / 48 / 49 / 10** 作为独立断言保留（目录数 7 → 10 = 根 + 6 个清单目录 + 3 个 Skill Level 3 子目录）；**注意**：`templates_loaded == 46` 在 P2 的单元测试中**出现于 3 个不同的用例函数**，MUST **全部**改写为 54，MUST NOT 只改第一处；（b）单元测试侧："工作区内无任何 `.py` 文件"的断言 MUST 改为"**除本 Phase 新增的 6 个 `.py` 文件外**无其它 `.py` 文件"（`tools/` 下 5 个：3 个工具 + 契约库 + 包初始化；Skill 第三层演示脚本 1 个），**且**同一条用例内"内置工具文件**不存在**"的否定断言 MUST 改为"这 4 个文件**已存在**"（P3 起它们是清单内条目，否定断言必然失败），同时 MUST **保留**"工作区内无**智能体入口文件**"这条**持久不变量** —— 该不变量的口径按 FR-050 引用的**宪法 §6.3 例外 E-02 + §5 章 [D-19]** 执行（Skill 第三层演示脚本**获宪法授权**，**不计入**该不变量的违例 —— FR-050 已于 2026-10-23 定点改写为引用口径，MUST NOT 自设豁免）；（c）单元测试侧："退出码集合恰为 `{0,1,2,3}`" MUST 改为 `{0,1,2,3,4}`，**且**"客户端异常映射表取值集合恰为 `{1,2,3}`" MUST 改为 `{1,2,3,4}`，**且**同一条用例内"退出码 4 **不在**实际使用集合中"的断言 MUST 改为"退出码 4 **已在**实际使用集合中"（P3 起 4 进入映射表），同时"运行期依赖恰为 1 个"的断言 MUST **保持不变**；（d）单元测试侧：`tools/README.md` **源文件正文**的契约断言（断言其正文含"内置工具由后续阶段生成"）因 FR-056 的正文覆盖而失效，MUST 随新正文改写为"正文 MUST 含 P3 阶段实际写入的 8 项规范要点"（口径见 FR-044）；（e）F001-P2 的 e2e 场景 1（落地文件数与模板计数）与场景 11（"还没有内置工具文件"） MUST 同样改写为 P3 落地后的正确口径；**且** F001-P2 的 e2e **场景 5** 中"渲染产物 MUST NOT 残留 `{{ … }}` 占位符"的断言 MUST **保持原样、MUST NOT 改写** —— 其成立由 FR-049 的占位记法约束保证。**计数口径**：本条列举的是**断言组**；每组内**具体断言语句的条数与位置 MUST 以 `tests/unit/test_template_skeleton.py` 与 `tests/e2e/phase/verify_phase_f001_p2.py` 的实际内容为准** —— 实施前 MUST **逐行核对**这两个文件，MUST NOT 以任何概括性计数（如"7 条"）为准，MUST NOT 遗漏任何一条会因本 Phase 交付而失效的断言。
-- **FR-069**: 改写 MUST NOT 触碰 F001-P2 的**持久不变量**（MUST NOT 削弱"无 Python 入口文件""运行期依赖恰为 1 个""用户内容不被破坏"等断言，亦 MUST NOT 削弱"渲染产物 MUST 无 `{{ … }}` 占位符残留"（F001-P2 契约 B12）这条持久不变量）；MUST NOT 靠"改红既有测试"或"让既有测试红着提交"蒙混过关。**本 Phase 引入的唯一一处通则例外**（契约库豁免于强制重置，FR-105）MUST 只作用于契约库**一个**条目 —— 其实现口径与**计数后果**（带强制标志且契约库已存在时：`templates_loaded=54` / `files_created=47` / `files_skipped=1`）见 contracts/cli-contract.md §3.2。
+- **FR-069**: 改写 MUST NOT 触碰 F001-P2 的**持久不变量**（MUST NOT 削弱"无 Python 入口文件""运行期依赖恰为 1 个""用户内容不被破坏"等断言，亦 MUST NOT 削弱"渲染产物 MUST 无 `{{ … }}` 占位符残留"（F001-P2 契约 B12）这条持久不变量）；MUST NOT 靠"改红既有测试"或"让既有测试红着提交"蒙混过关。**本 Phase 引入的唯一一处通则例外**（契约库豁免于强制重置，FR-105）MUST 只作用于契约库**一个**条目 —— 其实现口径与**计数后果**（带强制标志且契约库已存在时：`templates_loaded=54` / `files_created=47` / `files_skipped=1`）见 contracts/cli-contract.md §3.2。**（计数口径变更登记 · 2026-10-30 · 宪法 [D-22]）**：该 `--force` 情形的三个计数现为 `templates_loaded=54` / **`files_created=0`** / **`files_overwritten=47`** / `files_skipped=1` —— 原先的 `files_created=47` 实为"**覆盖**"（删除后重建）而非"新建"，FR-006 的字面口径是「本次**新建**文件数」，故此处**归位**；本 FR 的**其余文字 MUST NOT 改动**。
 - **FR-070**: 本 Phase MUST NOT 修改 F001-P1 / F001-P2 已实现的模块（仅**追加**：模板源文件与清单条目、1 个异常类、1 个退出码常量、1 行客户端异常映射）；MUST NOT 修改核心库门面的函数体、**通用**模板渲染逻辑（`render_templates` / `load_template_manifest`）与工作区清单逻辑。**唯一允许的例外**：MUST 允许在 `init_workspace_inner` 的渲染步骤（步骤 ④）增加**一条条目级强制重置豁免**（契约库 `tools/changes.py` —— 见 FR-105 / FR-069；实现口径见 research.md R-07：豁免 MUST 落在**编排层**（把已存在的契约库条目从传给渲染器的条目列表中剔除并计入 `files_skipped`），通用渲染器 MUST 一字不改）。该例外 MUST 只作用于契约库**一个**条目。
+
+#### 阶段边界断言的二次显式改写（宪法 [D-22] · 2026-10-30）
+
+> **本节是 [D-22] 对 F001-P3 自身断言的改写登记** —— 授权来源 = 宪法第 5 章 **[D-22]** +
+> Maintainer 裁决（2026-10-30）。**FR-068 / FR-069 的原文 MUST NOT 删改**（上文保持不动），
+> 本节只做**追加登记**；FR / SC **编号一律不动**。
+
+| # | 位置 | 原断言 | 新断言 | 改写理由 |
+|---|---|---|---|---|
+| 1 | `tests/e2e/phase/verify_phase_f001_p3.py` 场景 1 | `assert "templates=54 created=48 skipped=0" in completed.stdout` | `templates=54 files_created=48 files_overwritten=0 files_skipped=0 dirs_created=6 dirs_skipped=0` | 摘要按「对象 × 动作」分解（[D-22]） |
+| 2 | 同上 · 场景 8（删 1 个文件后 init） | `assert "templates=54 created=1 skipped=47" in completed.stdout` | `templates=54 files_created=1 files_overwritten=0 files_skipped=47 dirs_created=0 dirs_skipped=6` | 同上 |
+| 3 | 同上 · 场景 9（`--force` 保留用户工具） | `assert "templates=54 created=47 skipped=1" in completed.stdout` | `templates=54 files_created=0 files_overwritten=47 files_skipped=1 dirs_created=0 dirs_skipped=6` | 同上；**`files_created` 由 47 归位为 0**（47 是**覆盖**而非新建 —— FR-006 字面口径） |
+| 4 | `tests/unit/test_builtin_tools.py::test_counts_across_init_modes` | `(templates_loaded, files_created, files_skipped)` 三元组（54/48/0、54/0/48、54/47/1） | 六元组（`templates_loaded` / `files_created` / `files_overwritten` / `files_skipped` / `dirs_created` / `dirs_skipped`） | 同上 |
+
+> **MUST NOT 触碰**的持久不变量（FR-069）："工作区内无**智能体入口文件**"、"运行期依赖恰为 1 个"、
+> "用户内容不被破坏"、"渲染产物 MUST 无 `{{ … }}` 占位符残留" —— **四条一律未动**。
+>
+> **登记口径**：上表逐条给出「位置 / 原断言 / 新断言」；**实施前 MUST 逐行核对**
+> `tests/e2e/phase/verify_phase_f001_p3.py` 与 `tests/unit/test_builtin_tools.py` 的**实际内容**，
+> MUST NOT 以任何概括性计数为准（沿用 FR-068 的登记口径）。
 
 #### 异常、退出码与客户端映射（实现要点 §5）
 

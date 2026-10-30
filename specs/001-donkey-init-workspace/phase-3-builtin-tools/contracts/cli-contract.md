@@ -39,7 +39,7 @@ def init_workspace(path: str | Path, name: str | None = None, force: bool = Fals
 ## 3. `init_workspace_inner` 的契约变化（**唯一**的编排层改动）
 
 ```python
-def init_workspace_inner(path, name, force) -> tuple[Path, str, bool, int, int, int]
+def init_workspace_inner(path, name, force) -> tuple[Path, str, bool, list[InitItem], int]
     #  ① validate_init_request      （P1，不动）
     #  ② load_template_manifest     （P2，不动）→ 54 条
     #  ③ abs_path.mkdir             （P1，不动）
@@ -52,11 +52,17 @@ def init_workspace_inner(path, name, force) -> tuple[Path, str, bool, int, int, 
 ```text
 若 force 且 契约库路径已存在于 workspace:
     entries_for_render = [e for e in manifest_entries if e["path"] != "tools/changes.py"]
-    created, skipped = render_templates(abs_path, name, force, entries_for_render)
-    skipped += 1                      # 契约库被保留 → 计入 skipped
+    items = render_templates(abs_path, name, force, entries_for_render)
+    items.append(InitItem(path="tools/changes.py", kind="file", action="skipped"))
+                                        # 契约库被保留 → 计入 skipped（逐项明细）
 否则:
-    created, skipped = render_templates(abs_path, name, force, manifest_entries)
+    items = render_templates(abs_path, name, force, manifest_entries)
 ```
+
+> **口径变更登记（宪法 [D-22] · 2026-10-30）**：`render_templates` 现返回**逐项明细**
+> `list[InitItem]`（`path` / `kind` / `action`），各计数由明细**投影**而来（**单一真相源**）——
+> 原先返回 `(files_created, files_skipped)` 两个计数。豁免逻辑本身（只豁免契约库**一个**条目）
+> **未变**。
 
 **约束**：
 - MUST 只豁免**契约库一个**条目 —— P2 的通用通则对其余条目**原样成立**（spec FR-069）；
@@ -65,13 +71,25 @@ def init_workspace_inner(path, name, force) -> tuple[Path, str, bool, int, int, 
 
 ### 3.2 计数口径（契约的权威表）
 
-| 场景 | `templates_loaded` | `files_created` | `files_skipped` |
-|---|---|---|---|
-| 全新创建 | **54** | **48** | **0** |
-| 二次 init（非强制） | 54 | **0** | **48** |
-| `--force`（契约库已存在） | 54 | **47** | **1** |
+> **口径变更登记（2026-10-30 · 宪法 [D-22] · Maintainer 裁决）**：计数改为按
+> 「**操作对象**（文件 / 目录）× **动作**（新建 / 覆盖 / 跳过）」分解 —— 原表把
+> `--force` 的**覆盖**并入 `files_created`，"新建"与"覆盖"不可区分；FR-006 的字面口径是
+> 「本次**新建**文件数」，故此处**归位**，`files_created` 在 `--force` 情形为 **0**。
+> 该表被 F001-P4 的 tasks T032 引为**当前权威计数源**，MUST 与实现保持一致。
 
-> **与 P2 的差异**：P2 是 `46 / 40 / 0`（全新）；P3 的 54 = 46 + 8 条追加，文件型 48 = 40 + 8。
+| 场景 | `templates_loaded` | `files_created` | `files_overwritten` | `files_skipped` | `dirs_created` | `dirs_skipped` |
+|---|---|---|---|---|---|---|
+| 全新创建 | **54** | **48** | 0 | **0** | **6** | 0 |
+| 二次 init（非强制） | 54 | **0** | 0 | **48** | 0 | **6** |
+| `--force`（契约库已存在） | 54 | **0** | **47** | **1** | 0 | **6** |
+
+> **算术自洽**：`templates_loaded` == 五类计数之和（54 = 48 + 0 + 0 + 6 + 0）。
+>
+> **目录条目**：**永不**"覆盖"（既有目录一律保留不动）；其"新建 / 跳过"以**本次运行开始前**的
+> 存在状态判定（否则目录会被其**子条目**的父目录创建提前建出 → 结果依赖清单顺序）。
+>
+> **与 P2 的差异**：P2 是 `46 / 40 / 0`（全新）；P3 的 54 = 46 + 8 条追加，文件型 48 = 40 + 8
+> （**历史**口径，P2 阶段的 `46 / 40` 保持不动）。
 
 ---
 

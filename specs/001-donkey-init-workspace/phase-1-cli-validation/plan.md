@@ -59,7 +59,7 @@
 | G6 | §3.2 永不使用清单（LangSmith / deepagents / ShellToolMiddleware / subagent） | ✅ PASS | 本 Phase 无任何 LangChain 调用；quickstart §5 含 `langsmith` grep 自检 |
 | G7 | §2.2 路径绝对化原则 | ✅ PASS | 相对路径解析一次即转绝对路径（FR-010）；名称取解析后末段（FR-003 / FR-012） |
 | G8 | §2.3 / AC-3 workspace 原子性 + init 幂等 | ✅ PASS | FR-008 / FR-028：已存在不报错、不破坏；`--force` 在 P1 仅记录 |
-| G9 | §2.8 / D-08 三端共用 `core.api` 库 API | ✅ PASS | `init_workspace` 门面 + `InitResult` 冻结（`contracts/library-api.md`） |
+| G9 | §2.8 / D-08 三端共用 `core.api` 库 API | ✅ PASS | `init_workspace` 门面 + `InitResult` 冻结（`contracts/library-api.md`）—— **契约 v2**（2026-10-30 · 宪法 [D-22]）：v1 六字段**逐字保留、顺序不变**，追加 `files_overwritten` / `dirs_created` / `dirs_skipped` / `items` 四字段 + `INIT_RESULT_CONTRACT_VERSION = 2`；**三端共用面未变** |
 | G10 | N-03 入口点不得位于 `core/` | ✅ PASS | 入口点在 `donkey/cli/cli_client.py` + `donkey/__main__.py` + `[project.scripts]` |
 | G11 | §3.4 / D-05 模板与 sqlite3 schema 属 P2 | ✅ PASS | P1 只建档模板清单（3 条）+ 3 个同名 `.txt` 源，**不加载、不渲染、不写任何文件** |
 | G12 | §4.6 技术指标：单元测试覆盖率 ≥ 80%（`donkey.core`） | ✅ PASS | spec SC-016；以**独立命令** `pytest tests/unit/ --cov=donkey.core --cov-fail-under=80` 度量（**MUST NOT** 写入 pytest 全局 `addopts`，否则 e2e 黑盒脚本单独运行时不 import 业务代码会把覆盖率拉到 0 而误报失败）；dev 依赖新增 `pytest-cov` |
@@ -101,6 +101,8 @@ donkey/                              # 顶层 Python 包（仓库根即包根）
 ├── core/                            # 引擎层 / 库 API（零进程感知）
 │   ├── __init__.py
 │   ├── api.py                       # InitResult + init_workspace 门面（TDD：先落桩后补实现）
+│   │                                #   —— 契约 v2（宪法 [D-22]）：追加 files_overwritten /
+│   │                                #      dirs_created / dirs_skipped / items 四字段
 │   ├── exit_codes.py                # 段位常量（0/1/2 使用；3/4 与段位元组建档备用）
 │   ├── exceptions.py                # DonkeyError ← WorkspaceInitError ← {PathNotFound, PathPermission}
 │   └── workspace/

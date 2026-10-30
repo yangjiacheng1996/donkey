@@ -18,29 +18,37 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from donkey.core.exceptions import _NEXT_STEP_TEMPLATE, TemplateGenerationError
+from donkey.core.version import resolve_version
 
 #: 工作区清单的文件名（落在 workspace 根目录）。
 WORKSPACE_MANIFEST_FILENAME = "manifest.json"
-
-#: 工作区清单的版本号（v1 = ``1``）。
-_MANIFEST_VERSION = 1
-
-#: 工作区清单的 donkey 版本号 —— v1 阶段**硬编码**，MUST NOT import 内部
-#: ``__version__``（循环依赖风险，spec FR-021）。
-_DONKEY_VERSION = "0.1.0"
 
 
 def _build_manifest(name: str) -> dict[str, object]:
     """构造一份工作区清单字典。
 
-    字段**恰好且仅**为四项 —— 版本号 / 名字 / 创建时间 / donkey 版本号
-    （spec FR-019）。
+    字段**恰好且仅**为三项 —— 名字 / 创建时间 / donkey 版本号。
+
+    > **口径变更登记（宪法 [D-21] · 2026-10-30 · Maintainer 裁决）**：
+    > - **删除**原"版本号（整数 ``1``）"字段 —— 该字段**无人读取**（包内模板
+    >   清单的同名 ``version`` 是另一个文件、另一个含义），且与
+    >   ``donkey_version`` 并排时读作"两个打架的版本号"。
+    > - ``donkey_version`` 改为**动态取值** —— 原 F001-P2 FR-021 的硬编码
+    >   （``"0.1.0"``，理由"MUST NOT 通过导入内部版本符号获取（循环依赖风险）"）
+    >   的代价是：版本 bump 后**新建**的工作区仍记旧版本号 → F002
+    >   ``donkey load`` 的迁移提示**误判**工作区陈旧。该 FR 自身已预留演进
+    >   路径（"将来若改为动态获取，MUST 使用包元数据查询方式"），本次即走该路径
+    >   —— ``donkey.core.version`` 正是为此而建的核心层模块，且
+    >   ``donkey/__init__.py`` **零 import** → 引用它**不成环**。
+    >
+    > **存量工作区兼容**：旧工作区的清单里可能仍带 ``"version": 1`` ——
+    > 读取端原样返回字典、不解析该键，故**不影响任何读路径**；``--force``
+    > 重写时该键被自然清除（归一到三字段形态）。
     """
     return {
-        "version": _MANIFEST_VERSION,
         "name": name,
         "created_at": datetime.now(UTC).isoformat(),
-        "donkey_version": _DONKEY_VERSION,
+        "donkey_version": resolve_version(),
     }
 
 

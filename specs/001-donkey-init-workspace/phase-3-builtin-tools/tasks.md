@@ -146,7 +146,9 @@ description: "Task list for F001-P3 builtin_tools —— donkey init 内置工�
 
   **MUST NOT 改写**：P2 **场景 5** `test_scenario_5_name_injection` 的"渲染产物 MUST NOT 残留 `{{ … }}` 占位符"断言（`:393-395`）→ **MUST 保持原样** —— 其成立由 spec FR-049 的**占位记法约束**保证（spec FR-068(e)），MUST NOT 靠删断言兑现（spec FR-069 的持久不变量）。
 
-  **MUST NOT**：删除这两个场景，MUST NOT 让 P2 的其余 **12** 个场景（14 个场景减去已改写的场景 1 与场景 11）与全部持久不变量变红（spec FR-069）　〔覆盖 spec FR-068 / FR-069 · SC-002〕
+  **MUST NOT**：删除这两个场景，MUST NOT 让 P2 的其余 **12** 个场景（14 个场景减去已改写的场景 1 与场景 11）与全部持久不变量变红
+
+  > **二次改写登记（宪法 [D-22] · 2026-10-30 · Maintainer 裁决）**：本 Phase 的**自身**断言又被改写一次 —— `donkey init` 的摘要按「对象 × 动作」分解（`files_created` / `files_overwritten` / `files_skipped` / `dirs_created` / `dirs_skipped`），且 `files_created` 的语义**归位**为 FR-006 字面口径「本次**新建**文件数」。改写明细见本 Phase 的 `spec.md`「阶段边界断言的二次显式改写（宪法 [D-22]）」段；上表登记的**既有**内容 MUST NOT 删改。（spec FR-069）　〔覆盖 spec FR-068 / FR-069 · SC-002〕
 
 **Checkpoint**: US1 可独立验证 —— `donkey init` 产出可用的内置工具与契约库（MVP）
 

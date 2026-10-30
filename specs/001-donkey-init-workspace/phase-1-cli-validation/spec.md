@@ -316,3 +316,16 @@
 - **术语口径**：本 spec 中 "Phase" = F001-P1（开发阶段）；"子段" = F001 子段 1（退出码 `1-2`）；"段位" = F001 段位 `1-10`；三者严格分层（宪法 §4.3）。
 - **范围外**：本阶段不含模板骨架内容、模板清单加载、3 个内置工具、Skills 示例、workspace manifest 写入、名称向模板内容（README 标题 / provider 注释 / manifest）的注入，以及 `load` / `session` / `run` 等其它子命令——它们分属 F001-P2 / F001-P3 / F002 / F003 / F004。本阶段交付的 workspace 根目录为**过渡态**——尚不含宪法 §2.6 要求的 `instruction.md` / `providers/` / `tools/` / `mcp/mcp.json` / `skills/` / `memory/`；§2.6 的符合性由 F001-P2（模板骨架生成）达成。
 - **下游流程**：本 spec 只定义"做什么"与"怎样算成功"；实现步骤、任务拆分、依赖版本锁定留给 `/speckit.plan` 与 `/speckit.tasks`。
+
+---
+
+## 后续修订登记（不改写本 spec 的 FR / SC 原文）
+
+> **本节只做指针登记** —— 上文 FR / SC 的**编号与原文一律不动**，保住本 Phase 的历史记录
+> （本 Phase 交付时，`InitResult` **确实是**六个字段）。现行口径以**宪法第 5 章 [D-21] / [D-22]**
+> 为准。
+
+| 项 | 本 spec 原文（**历史事实**，不改写） | 现行口径（宪法 [D-22] · 2026-10-30 · Maintainer 裁决） |
+|---|---|---|
+| **FR-006** | `init_workspace` MUST 返回一个不可变的结果对象，其**字段与顺序固定为**：`workspace_path` / `name` / `force` / `templates_loaded` / `files_created` / `files_skipped`；该契约是后续阶段共同依赖的稳定接口，字段语义不得在本阶段之后**无版本号**变更 | **库 API 契约 v2** —— v1 的六个字段**逐字保留、顺序不变**，在其后**追加** `files_overwritten` / `dirs_created` / `dirs_skipped` / `items` 四个字段，并引入 `INIT_RESULT_CONTRACT_VERSION = 2`（**满足** FR-006 的"无版本号不得变更"要求）。`files_created` 的语义**归位**为 FR-006 字面口径「本次**新建**文件数」——原先 `--force` 的**覆盖**被并入其中，现分列为 `files_overwritten`（授权 = 宪法 [D-22]） |
+| **不变项** | —— | FR-006 的"不可变"（`frozen=True`）、"绝对路径"、"名称定夺规则"三条 MUST 均**未受影响**；F001-P1 / P2 / P3 的 **FR / SC 编号**一律不动；`donkey init` 的**参数面**（仅 `path` + `--force`）不动 |

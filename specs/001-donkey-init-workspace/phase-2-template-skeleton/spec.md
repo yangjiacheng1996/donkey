@@ -562,3 +562,19 @@
 - **范围外**：3 个内置工具文件 + 包初始化文件 + 示例 Skill 的完整第二层正文与第三层资源（F001-P3）；`donkey load` / `donkey session` / `donkey run` 等其它子命令（F002 / F003 / F004）；任何中间件挂载与模型连通性测试；workspace 路径末段名的合法性校验（v2+）；sqlite3 结构健康检查（属配置检查码段）。
 - **下游流程**：本 spec 只定义"做什么"与"怎样算成功"；实现步骤、任务拆分、依赖版本锁定留给 `/speckit.plan` 与 `/speckit.tasks`。
 - **宪法 §3.4 的 Phase 级豁免**（默认口径，非用户决策项）：宪法 §3.4 要求 `donkey init` 自动生成 3 个内置 `@tool`（filesystem / commandline / webfetch）作为 Skill Level 3 的标准访问通道 —— 该 MUST 在 **Feature F001 级**由 F001-P3 满足；本 Phase（F001-P2）依 spec FR-066 MUST NOT 生成它们（模板清单中零 `format: "python"` 条目，plan G14）。二者并非冲突，只是 Phase 切分的结果（宪法 §4.3 规则 B：按退出码段位切 Phase）。
+
+---
+
+## 后续修订登记（不改写本 spec 的 FR / SC 原文）
+
+> **本节只做指针登记** —— 上文 FR / SC 的**编号与原文一律不动**，保住本 Phase 的历史记录
+> （本 Phase 交付时，工作区清单**确实是**四字段、`donkey_version` **确实是**硬编码 `0.1.0`）。
+> 现行格式口径以**宪法第 5 章 [D-21]** 为准。
+
+| 项 | 本 spec 原文（**历史事实**，不改写） | 现行口径（宪法 [D-21] · 2026-10-30 · Maintainer 裁决） |
+|---|---|---|
+| **FR-019** | 工作区清单字段 MUST **恰好且仅**为四项 —— 版本号（整数，v1 填 `1`）、名字、创建时间、donkey 版本号 | 工作区清单字段 MUST 为**三项** —— 名字 / 创建时间 / donkey 版本号。**"版本号（整数 `1`）"字段已删除**（该字段全仓无人读取，且与 `donkey_version` 并排时读作"两个打架的版本号"） |
+| **FR-021** | donkey 版本号在 v1 阶段 MUST 取**硬编码值** `0.1.0`；MUST NOT 通过导入内部版本符号获取（循环依赖风险）；**将来若改为动态获取，MUST 使用包元数据查询方式** | `donkey_version` MUST **动态取值** —— 取 `donkey.core.version.resolve_version()`（优先安装分发元数据、不可得时回退包内 `__version__`）。本 FR 预留的演进路径**即本次所走之路**；其"循环依赖风险"的理由因 `donkey.core.version` 的诞生而**已不复存在**（`donkey/__init__.py` 零 import → 引用不成环） |
+| **受影响的既有断言** | `tests/unit/test_template_skeleton.py` 的清单字段断言（4 处） | **已显式改写**为动态口径（字段集合去掉 `version`；`donkey_version` 改为与运行时版本比对，MUST NOT 断言字面量 `"0.1.0"` —— 否则版本 bump 后会假失败）。改写逐条登记在该用例的 docstring「断言改写登记」注记中 |
+| **FR-017** | 计数口径 —— 新建数与跳过数 MUST 仅统计**文件型**条目（文本模板 + sqlite3 模板）；目录条目 MUST NOT 计入两者 | 清单计数现按「**对象 × 动作**」分列（宪法 [D-22]）—— 文件分列 `files_created` / `files_overwritten` / `files_skipped`，**目录条目不再"不计入"**，而是分列为 `dirs_created` / `dirs_skipped`；目录条目**永不**"覆盖"（既有目录一律保留不动），其"新建 / 跳过"以**本次运行开始前**的存在状态判定（否则目录会被其**子条目**的父目录创建提前建出 → 结果依赖清单顺序）。FR-017 的**原文 MUST NOT 改动** |
+| **不变项** | —— | **包内模板清单** `donkey/core/workspace/templates/manifest.json` 的 `version` 字段**逐字不动**（它是**被强制校验**的真实格式契约，`init.py` 据此报错，与本条无关）；F001-P1 / P2 / P3 的 **FR / SC 编号**一律不动 |
